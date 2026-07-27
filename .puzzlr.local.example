@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy this file to .puzzlr.local (same folder) and fill in your real key. .puzzlr.local is untracked via the *.local rule in .gitignore. The env vars PUZZLR_API_KEY / PUZZLR_GAME_ID override these values.",
+  "apiKey": "your-puzzlr-api-key-here",
+  "gameId": "30454bd0-3a84-4ea0-8d6f-9ef560d8f31a"
+}

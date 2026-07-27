@@ -1,0 +1,91 @@
+{
+  "knowledgeLevels": [
+    "None",
+    "General vocabulary",
+    "Common cultural",
+    "Specialist cultural"
+  ],
+  "nicheKnowledgeLevels": [
+    "Ubiquitous",
+    "Mainstream",
+    "Niche"
+  ],
+  "manipulationTypes": [
+    "None",
+    "Compound",
+    "Partial",
+    "Abbreviation",
+    "Hidden word",
+    "Word split",
+    "Homophone",
+    "Rhyme",
+    "Anagram",
+    "Reversal",
+    "Cipher",
+    "Letter add-delete",
+    "Plural add-delete"
+  ],
+  "abstractionLevels": [
+    "Direct membership",
+    "Shared property",
+    "Synonyms",
+    "Multi-sense",
+    "Lexical rewrite",
+    "Association",
+    "Loose thematic"
+  ],
+  "knowledgeDomains": [
+    "Sport",
+    "Music",
+    "Language",
+    "Vocabulary",
+    "Geography",
+    "Science",
+    "Technology",
+    "Food",
+    "History",
+    "Film-TV",
+    "Literature",
+    "Religion",
+    "Maths",
+    "Games",
+    "Nature",
+    "Art",
+    "Society",
+    "Politics",
+    "Military/War",
+    "Transport"
+  ],
+  "impostorColumnManipulationTypes": [
+    "None",
+    "Hidden word",
+    "Compound",
+    "Partial",
+    "Letter add-delete",
+    "Homophone"
+  ],
+  "answerConstructionManipulationTypes": [
+    "None",
+    "Compound",
+    "Word split",
+    "Hidden word",
+    "Phrase"
+  ],
+  "manipulationModifiers": {
+    "position": {
+      "values": ["start", "middle", "end", "mixed"],
+      "appliesTo": ["Compound", "Partial", "Hidden word"]
+    },
+    "whole": {
+      "values": ["multi-word", "single word"],
+      "appliesTo": ["Partial"]
+    }
+  },
+  "knowledgeDomainGroups": {
+    "STEM": ["Science", "Maths", "Technology", "Nature"],
+    "Humanities": ["History", "Literature", "Religion", "Politics", "Military/War"],
+    "Entertainment": ["Music", "Film-TV", "Sport", "Games", "Art"],
+    "Everyday": ["Geography", "Food", "Society", "Transport"],
+    "Words": ["Vocabulary", "Language"]
+  }
+}

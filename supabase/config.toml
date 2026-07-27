@@ -1,0 +1,24 @@
+# Supabase project config (POC).
+#
+# Minimal config for deploying Edge Functions. `project_id` is the local project
+# reference used by the CLI; link the real hosted project with
+#   supabase link --project-ref <ref>
+# The publish path holds the Puzzlr API key in a function secret — never here.
+project_id = "relink-cms"
+
+[functions.publish-puzzle]
+# JWT verification is ON: the browser must send a valid Supabase session token.
+# The function additionally checks the caller is an editor/admin and the puzzle
+# is in `ready` before it touches Puzzlr.
+verify_jwt = true
+
+[functions.admin-invite-user]
+# JWT verification ON. The function itself re-checks the caller is an admin, then
+# uses the auto-injected SUPABASE_SERVICE_ROLE_KEY (never in the browser) to
+# invite a user and assign their initial role.
+verify_jwt = true
+
+[functions.admin-list-users]
+# JWT verification ON. Admin-only. Reads emails/join dates from auth.users via the
+# service-role key — data RLS cannot expose to the browser.
+verify_jwt = true

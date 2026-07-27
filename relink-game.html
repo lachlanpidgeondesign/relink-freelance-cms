@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Relink — Play the puzzle (preview)</title>
+  <style>
+    html, body { margin: 0; overscroll-behavior: none; background: #f4f4f5; }
+    .harness {
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      padding: 16px; font-family: system-ui, sans-serif;
+    }
+    .harness .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .harness select, .harness button {
+      font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid #d4d4d8; background: #fff;
+    }
+    .harness .stage {
+      width: 100%; max-width: 640px; background: #fff; border: 1px solid #e4e4e7;
+      border-radius: 12px; overflow: hidden;
+    }
+    .harness .status { font-size: 13px; color: #52525b; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <div class="harness">
+    <div class="bar">
+      <label>Puzzle:
+        <select id="puzzle-select"></select>
+      </label>
+      <button id="reload-btn" type="button">Reload / restart</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="stage" id="stage"></div>
+  </div>
+
+  <script type="module">
+    import { mountRelinkGame } from './js/relink-game/relink-game.js';
+
+    const stage = document.getElementById('stage');
+    const select = document.getElementById('puzzle-select');
+    const statusEl = document.getElementById('status');
+    let game = null;
+
+    // A few puzzles to preview; l125 is the exact puzzle captured in the snapshots.
+    const OPTIONS = ['l125', 'l123', 'l65', 'l1', 'l10'];
+    for (const id of OPTIONS) {
+      const o = document.createElement('option');
+      o.value = id;
+      o.textContent = id +
+        (id === 'l125' ? '  (snapshot puzzle)' : id === 'l123' ? '  (answer sentence)' : '');
+      select.appendChild(o);
+    }
+
+    async function load(id) {
+      statusEl.textContent = 'Loading ' + id + '…';
+      if (game) { game.destroy(); game = null; }
+      stage.replaceChildren();
+      try {
+        const res = await fetch('./save-data/' + id + '.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const puzzle = await res.json();
+        game = mountRelinkGame(stage, puzzle, {
+          onComplete: () => { statusEl.textContent = 'Completed — puzzle solved.'; },
+          onFail: () => { statusEl.textContent = 'Failed — out of guesses.'; },
+        });
+        statusEl.textContent = 'Playing ' + id + '. Find the imposter in each row.';
+      } catch (err) {
+        statusEl.textContent = 'Could not load ' + id + ': ' + err.message +
+          '  (serve with: python3 server.py 8080, open in Chrome/Edge)';
+      }
+    }
+
+    select.addEventListener('change', () => load(select.value));
+    document.getElementById('reload-btn').addEventListener('click', () => load(select.value));
+    load(select.value);
+  </script>
+</body>
+</html>

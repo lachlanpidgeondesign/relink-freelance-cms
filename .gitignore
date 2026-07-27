@@ -1,0 +1,37 @@
+node_modules
+dist
+.DS_Store
+*.local
+__pycache__/
+analytics/raw_data/
+analytics/.cache/
+analytics/.logs/
+catboost_info/
+analytics/v2/outputs/training.parquet
+.env
+.puzzlr.local
+
+# Downloaded Supabase CLI binaries (moved out of the repo root so the
+# supabase/ project directory can exist alongside them).
+bin/supabase
+bin/supabase-go
+
+# Supabase local dev artefacts
+supabase/.branches/
+supabase/.temp/
+# Edge Function local secrets (the real Puzzlr key lives in Supabase secrets)
+supabase/functions/.env
+
+# Scraped design-reference HTML from the live game (kept locally for reference,
+# not part of the product)
+Saved html from Relink/
+
+# Previous puzzle content — answers, clue sheet, reusable rows, hint articles.
+# Kept locally but never committed to the public repo. The deployed platform
+# loads puzzles from Supabase, not these files. (pdl-schema.json is the PDL
+# taxonomy — no answers — so it stays tracked.)
+save-data/l*.json
+save-data/puzzles-index.json
+save-data/row-bank.json
+Relink Puzzles - relink_clue_sheet.csv
+hint-articles/
