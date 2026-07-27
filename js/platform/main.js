@@ -49,10 +49,17 @@ async function showApp(session) {
 function showAuth() {
   clearRoleCache();
   renderAuthView(mount);
-  // Surface an expired/invalid invite or reset link, if that's why we're here.
+  // Surface a broken invite / reset link (expired or already-used token) with
+  // actionable guidance. Clear the error hash so a refresh gives a clean screen.
   if (_hashError) {
     const msg = mount.querySelector('#auth-message');
-    if (msg) { msg.textContent = `That link is no longer valid: ${_hashError}`; msg.className = 'auth-message auth-message-error'; }
+    if (msg) {
+      msg.textContent =
+        `This invite or reset link has expired or was already used. Ask an admin to ` +
+        `send a new invite, or use “Forgot your password?” to set your password.`;
+      msg.className = 'auth-message auth-message-error';
+    }
+    history.replaceState(null, document.title, window.location.pathname + window.location.search);
   }
 }
 
@@ -90,6 +97,18 @@ showLoading();
 let _currentUserId = null;
 let _routedOnce = false;
 onAuthChange((event, session) => {
+  // A broken invite/recovery link (expired or already-used token) arrives with an
+  // error in the hash and no usable new session. Show the sign-in screen with the
+  // explanation, and do NOT silently fall through to any session already stored in
+  // this browser — that would drop the visitor into someone else's account (e.g.
+  // the admin who sent the invite, testing in the same browser).
+  if (_hashError) {
+    _routedOnce = true;
+    _currentUserId = session?.user?.id ?? null;
+    setTimeout(showAuth, 0);
+    return;
+  }
+
   // An invite or recovery link: intercept BEFORE normal routing so the user sets
   // a password first. supabase-js fires PASSWORD_RECOVERY for recovery links; for
   // invites we rely on the `type` captured from the URL hash above.
