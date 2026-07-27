@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relink CMS — Puzzle Design</title>
+  <link rel="preconnect" href="https://fonts.bunny.net" crossorigin>
+  <link href="https://fonts.bunny.net/css?family=plus-jakarta-sans:400,500,600,700" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+</head>
+<body>
+  <div id="app" class="app-layout">
+    <!-- Header -->
+    <header class="header app-header" id="header">
+      <div class="header-left">
+        <span class="header-logo">Relink CMS</span>
+        <div class="header-divider"></div>
+        <div class="header-breadcrumb" id="header-breadcrumb">
+          <span class="current">Dashboard</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn-ghost-sm" id="btn-toggle-list">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          Drafts
+        </button>
+        <button class="btn-ghost-sm" id="btn-new">+ New</button>
+        <button class="btn-ghost-sm" id="btn-undo" title="Undo (Ctrl+Z)" disabled><i class="fa-solid fa-rotate-left"></i></button>
+        <button class="btn-ghost-sm" id="btn-redo" title="Redo (Ctrl+Y)" disabled><i class="fa-solid fa-rotate-right"></i></button>
+        <button class="btn-ghost-sm" id="btn-save"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+        <button class="btn-ghost-sm" id="btn-send" title="Save and send this puzzle to the editor for review"><i class="fa-solid fa-paper-plane"></i> Send to editor</button>
+        <div class="header-divider"></div>
+        <span class="header-status" id="header-status">
+          <span id="writer-email"></span>
+        </span>
+        <button class="btn-ghost-sm" id="btn-signout" title="Sign out"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out</button>
+      </div>
+    </header>
+
+    <!-- Left Sidebar: Puzzle List -->
+    <aside class="app-sidebar-left" id="sidebar-left">
+      <div class="puzzle-list" id="puzzle-list">
+        <div class="puzzle-list-header">
+          <h2>My drafts</h2>
+          <div class="puzzle-list-search">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" id="search-input" placeholder="Search puzzles…" autocomplete="off">
+            <button class="btn-icon btn-sm search-clear" id="btn-search-clear" title="Clear search" style="display:none"><i class="fa-solid fa-xmark"></i></button>
+            <button class="btn-icon btn-sm" id="btn-search-fields" title="Search fields"><i class="fa-solid fa-sliders"></i></button>
+            <div class="search-fields-dropdown" id="search-fields-dropdown" style="display:none">
+              <label><input type="checkbox" data-search-field="name" checked> Name</label>
+              <label><input type="checkbox" data-search-field="id" checked> ID</label>
+              <label><input type="checkbox" data-search-field="tiles"> Tile text</label>
+              <label><input type="checkbox" data-search-field="categories"> Categories</label>
+              <label><input type="checkbox" data-search-field="answer"> Answer</label>
+              <label><input type="checkbox" data-search-field="decoyDescriptions"> Decoy descriptions</label>
+            </div>
+          </div>
+          <div class="puzzle-list-filters" style="display:none">
+            <input type="text" id="filter-from" placeholder="From" readonly>
+            <span class="filter-sep">–</span>
+            <input type="text" id="filter-to" placeholder="To" readonly>
+            <button class="btn-icon btn-sm" id="btn-completeness-filter" title="Completeness filters"><i class="fa-solid fa-filter"></i></button>
+            <div class="completeness-dropdown" id="completeness-dropdown" style="display:none">
+              <div class="filter-toggle" data-filter="writing">
+                <span class="filter-toggle-label">Writing</span>
+                <div class="toggle-group">
+                  <button class="toggle-btn active" data-val="off">Off</button>
+                  <button class="toggle-btn" data-val="complete"><i class="fa-solid fa-check"></i></button>
+                  <button class="toggle-btn" data-val="incomplete"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+              </div>
+              <div class="filter-toggle" data-filter="pdl">
+                <span class="filter-toggle-label">PDL</span>
+                <div class="toggle-group">
+                  <button class="toggle-btn active" data-val="off">Off</button>
+                  <button class="toggle-btn" data-val="complete"><i class="fa-solid fa-check"></i></button>
+                  <button class="toggle-btn" data-val="incomplete"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+              </div>
+              <div class="filter-toggle" data-filter="queued">
+                <span class="filter-toggle-label">Queued</span>
+                <div class="toggle-group">
+                  <button class="toggle-btn active" data-val="off">Off</button>
+                  <button class="toggle-btn" data-val="complete"><i class="fa-solid fa-check"></i></button>
+                  <button class="toggle-btn" data-val="incomplete"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="puzzle-list-items" id="puzzle-list-items"></div>
+        <div class="puzzle-list-footer">
+          <span class="count" id="puzzle-count">0 puzzles</span>
+          <div class="puzzle-list-footer-actions">
+            <div class="sort-control">
+              <button class="btn-ghost btn-sm" id="btn-sort" title="Sort order"><i class="fa-solid fa-arrow-down-wide-short"></i> <span id="sort-label">Date</span></button>
+              <div class="sort-dropdown" id="sort-dropdown" style="display:none">
+                <button class="sort-option active" data-sort="date">Date</button>
+                <button class="sort-option" data-sort="name">Name</button>
+                <button class="sort-option" data-sort="id">ID</button>
+                <hr>
+                <button class="sort-dir active" data-dir="desc"><i class="fa-solid fa-arrow-down-long"></i> Descending</button>
+                <button class="sort-dir" data-dir="asc"><i class="fa-solid fa-arrow-up-long"></i> Ascending</button>
+              </div>
+            </div>
+            <button class="btn-ghost btn-sm" id="btn-refresh-index">Refresh</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="resize-handle resize-handle-left" id="resize-left"></div>
+
+    <!-- Main Editor -->
+    <main class="app-main" id="main-area">
+      <div class="puzzle-editor" id="puzzle-editor">
+        <div class="puzzle-editor-empty" id="editor-empty">
+          <h2>Relink Puzzle CMS</h2>
+          <p>Create a new puzzle or open one from the list to get started.</p>
+          <button class="btn-primary" id="btn-new-empty">+ New Puzzle</button>
+        </div>
+        <div id="editor-content" style="display:none;">
+          <div class="readonly-banner" id="readonly-banner" style="display:none;">
+            <i class="fa-solid fa-lock"></i> This puzzle is in review and cannot be edited. It will become editable again if the editor sends it back.
+          </div>
+          <div class="feedback-box" id="feedback-box" style="display:none;">
+            <div class="feedback-box-head">
+              <i class="fa-solid fa-comment-dots"></i>
+              <span class="feedback-box-title">Editor feedback</span>
+              <span class="feedback-box-meta" id="feedback-box-meta"></span>
+            </div>
+            <div class="feedback-box-body" id="feedback-box-body"></div>
+          </div>
+          <div class="puzzle-header" id="puzzle-header-area">
+            <div class="puzzle-header-top">
+              <h2 id="puzzle-heading">Edit Puzzle</h2>
+            </div>
+            <div class="puzzle-header-fields">
+              <div class="form-field form-field-name">
+                <label>Name</label>
+                <input type="text" id="puzzle-name" placeholder="Puzzle name...">
+              </div>
+              <div class="form-field form-field-canonical-id">
+                <label>Puzzlr level ID</label>
+                <input type="text" id="puzzle-canonical-id" placeholder="Set automatically on publish…">
+              </div>
+            </div>
+          </div>
+          <div id="row-list"></div>
+          <div class="relink-section" id="relink-section">
+            <h3 class="section-header">Relink (Phase 2)</h3>
+            <div class="relink-card">
+              <div class="relink-color-bar"></div>
+              <div class="relink-body">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span style="font-size:13px;font-weight:500;">Tiles</span>
+                  <div class="relink-pdl-indicator" id="relink-pdl-indicator"></div>
+                </div>
+                <div class="relink-tiles" id="relink-tiles"></div>
+
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right resize handle + PDL / decoys sidebar (editor-only; hidden in the
+         simple writer portal, revealed in the platform editing view). -->
+    <div class="resize-handle resize-handle-right" id="resize-right"></div>
+    <aside class="app-sidebar-right" id="sidebar-right">
+      <div class="pdl-sidebar">
+        <div class="pdl-sidebar-header">
+          <h2 class="pdl-sidebar-title">PDL <span class="pdl-context-label" id="pdl-context-label"></span></h2>
+        </div>
+        <div class="pdl-content" id="pdl-content"></div>
+        <div class="decoy-section">
+          <div class="decoy-section-header">
+            <h3 class="decoy-section-title"><i class="fa-solid fa-clone"></i> Decoys</h3>
+            <div class="decoy-section-actions">
+              <button class="btn-ghost-sm" id="btn-create-decoy-from-sel" type="button" style="display:none;"></button>
+              <button class="btn-ghost-sm" id="btn-add-decoy" type="button"><i class="fa-solid fa-plus"></i> Add Decoy</button>
+            </div>
+          </div>
+          <div class="decoy-cards" id="decoy-cards"></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Export Modal -->
+  <div class="modal-overlay" id="export-modal" style="display:none;">
+    <div class="modal">
+      <h2>Export Puzzles</h2>
+      <div class="modal-actions">
+        <button class="modal-action-btn" id="export-current-json">
+          <span class="action-icon"><i class="fa-solid fa-file-code"></i></span>
+          <span class="action-text"><h3>Current Puzzle (JSON)</h3><p>Download the current puzzle as a JSON file</p></span>
+        </button>
+        <button class="modal-action-btn" id="export-all-json">
+          <span class="action-icon"><i class="fa-solid fa-box-archive"></i></span>
+          <span class="action-text"><h3>All Puzzles (JSON)</h3><p>Download all puzzles as a single JSON array</p></span>
+        </button>
+        <button class="modal-action-btn" id="export-pdl-summary">
+          <span class="action-icon"><i class="fa-solid fa-tags"></i></span>
+          <span class="action-text"><h3>PDL Summary (CSV)</h3><p>Aggregated PDL parameter counts</p></span>
+        </button>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" id="export-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Modal -->
+  <div class="modal-overlay" id="import-modal" style="display:none;">
+    <div class="modal">
+      <h2>Import Puzzles</h2>
+      <div class="modal-actions">
+        <button class="modal-action-btn" id="import-file">
+          <span class="action-icon"><i class="fa-solid fa-folder-open"></i></span>
+          <span class="action-text"><h3>Import from File</h3><p>Upload a JSON puzzle file or array</p></span>
+        </button>
+      </div>
+      <div class="modal-import-result" id="import-result" style="display:none;"></div>
+      <div class="modal-footer">
+        <button class="btn-ghost" id="import-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Schema Modal -->
+  <div class="modal-overlay" id="schema-modal" style="display:none;">
+    <div class="modal schema-modal">
+      <h2><i class="fa-solid fa-gear"></i> PDL Schema Editor</h2>
+      <p class="schema-modal-desc">Customise the option lists available in PDL dropdowns. Changes are saved to your connected folder.</p>
+      <div id="schema-fields"></div>
+      <div class="modal-footer">
+        <button class="btn-ghost" id="schema-reset">Reset to Defaults</button>
+        <button class="btn-primary" id="schema-save">Save &amp; Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row Bank Modal -->
+  <div class="modal-overlay" id="row-bank-modal" style="display:none;">
+    <div class="modal row-bank-modal">
+      <div class="row-bank-modal-header">
+        <h2><i class="fa-solid fa-box-archive"></i> <span id="row-bank-title">Row Bank</span></h2>
+        <button class="btn-ghost-sm" id="row-bank-add"><i class="fa-solid fa-plus"></i> New row</button>
+      </div>
+      <p class="row-bank-desc" id="row-bank-desc"></p>
+      <div class="row-bank-list" id="row-bank-list"></div>
+      <div class="modal-footer">
+        <button class="btn-ghost" id="row-bank-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Displaced-content prompt (importing onto a non-empty row) -->
+  <div class="modal-overlay" id="row-bank-displace-modal" style="display:none;">
+    <div class="modal">
+      <h2>Replace this row?</h2>
+      <p class="schema-modal-desc">This slot already has content. What should happen to the row currently there?</p>
+      <div class="modal-actions">
+        <button class="modal-action-btn" id="displace-bank">
+          <span class="action-icon"><i class="fa-solid fa-box-archive"></i></span>
+          <span class="action-text"><h3>Save it to the bank</h3><p>Move the current row into the Row Bank, then import</p></span>
+        </button>
+        <button class="modal-action-btn" id="displace-delete">
+          <span class="action-icon"><i class="fa-solid fa-trash"></i></span>
+          <span class="action-text"><h3>Discard it</h3><p>Delete the current row and import over it</p></span>
+        </button>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" id="displace-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js?v=1"></script>
+  <script>
+    // Tell the local dev server to shut down when this tab is closed (but not on refresh)
+    window._isRefresh = false;
+    window.addEventListener('keydown', function (e) {
+      if ((e.key === 'r' && (e.metaKey || e.ctrlKey)) || e.key === 'F5') window._isRefresh = true;
+    });
+    window.addEventListener('pagehide', function () {
+      if (!window._isRefresh) navigator.sendBeacon('/shutdown');
+    });
+  </script>
+</body>
+</html>

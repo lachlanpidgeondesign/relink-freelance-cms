@@ -71,7 +71,8 @@ live only in Supabase Edge Function secrets. See
 
 ```
 platform.html              Platform entry point (auth + role-based routing)
-index.html                 The puzzle composer (also embedded by the editor view)
+index.html                 Redirects to platform.html (the site's front door)
+composer.html              The puzzle composer (also embedded by the editor view)
 server.py                  Simple static dev server
 css/styles.css             Composer styles
 js/

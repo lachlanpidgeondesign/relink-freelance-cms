@@ -141,7 +141,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .app-layout:not(.embed-edit) .pdl-dot,
 .app-layout:not(.embed-edit) .row-bank-btn { display: none; }
 
-/* Embedded editing mode (loaded as index.html?edit=<id> inside the platform
+/* Embedded editing mode (loaded as composer.html?edit=<id> inside the platform
    editing view). Strip the writer chrome (header, drafts sidebar, left resize)
    but KEEP the editor plus the right-hand PDL / decoys sidebar, so editors get
    the full authoring surface. */

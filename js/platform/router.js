@@ -2,7 +2,7 @@
 //  ROUTER  —  role-based view selection
 // ============================================================================
 // After sign-in the user is routed by role:
-//   writer                     -> the composer (index.html) — the writer portal,
+//   writer                     -> the composer (composer.html) — the writer portal,
 //                                 which has its own "My drafts" sidebar + editor
 //   reviewer                   -> Queue + review view (play + comments + decisions)
 //   editor / admin             -> Queue + editing view (the composer superset,
@@ -105,8 +105,8 @@ function navTitleHtml(item) {
 // the queue shell rendered into `mount`. `onSignOut` handles staff sign-out.
 export function routeByRole(mount, role, { email, onSignOut } = {}) {
   if (!STAFF_ROLES.includes(role)) {
-    // Writers use the composer at index.html (its own drafts sidebar + editor).
-    window.location.replace('index.html');
+    // Writers use the composer at composer.html (its own drafts sidebar + editor).
+    window.location.replace('composer.html');
     return;
   }
 
@@ -672,7 +672,7 @@ async function renderReviewView(root, item, ctx = {}) {
 // ── Editing view: nav bar + Composer / Comments split (editors & admins) ─────
 // Structurally identical to the review view — same page shell, same right-hand
 // comments panel — but the centre swaps the playable game for the writer's phase-4
-// composer. The composer runs in an iframe pointed at index.html?edit=<id> (embed
+// composer. The composer runs in an iframe pointed at composer.html?edit=<id> (embed
 // mode), so it is the SAME editor writers use, just loaded with this puzzle's data
 // for direct editing. A panel toolbar flips the centre between "Play" (the same
 // game engine the review view uses — the default) and "Edit" (the composer).
@@ -955,7 +955,7 @@ async function renderEditingView(root, item, ctx = {}) {
       if (game) { game.destroy(); game = null; }
       if (!composerLoaded) {
         composerLoaded = true;
-        frame.src = `index.html?edit=${encodeURIComponent(puzzleId)}`;
+        frame.src = `composer.html?edit=${encodeURIComponent(puzzleId)}`;
       }
       saveBtn.disabled = !dirty;
       return;

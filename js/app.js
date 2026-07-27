@@ -20,7 +20,7 @@ import { isEditableState, getBounceBacks } from './platform/db.js';
 const $ = id => document.getElementById(id);
 
 // ── Embedded editor mode ──
-// When the composer is loaded as `index.html?edit=<puzzleId>` it is running inside
+// When the composer is loaded as `composer.html?edit=<puzzleId>` it is running inside
 // the platform editing view's iframe (phase 6). In that mode it opens that one
 // puzzle for an editor/admin and talks to the host window over postMessage instead
 // of showing the writer's own chrome (drafts sidebar, header, PDL sidebar). The
