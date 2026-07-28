@@ -19,6 +19,7 @@ import {
   claimPuzzle, markReady, bounceBack,
   getComments, addComment, getBounceBacks,
   adminDeletePuzzle, publishPuzzle,
+  createDraft, getMyDrafts, submitPuzzle, fastTrackPublish,
   listUsers, inviteUser, updateUserRole, USER_ROLES,
 } from './db.js';
 import { mountRelinkGame } from '../relink-game/relink-game.js';
@@ -111,6 +112,7 @@ export function routeByRole(mount, role, { email, onSignOut } = {}) {
   }
 
   const isAdmin = role === 'admin';
+  const canAuthor = role === 'editor' || role === 'admin';
 
   mount.innerHTML = `
     <div class="app-shell">
@@ -119,6 +121,7 @@ export function routeByRole(mount, role, { email, onSignOut } = {}) {
           <span class="app-brand">Relink</span>
           <nav class="app-nav">
             <button class="app-nav-link is-active" data-nav="queue">Queue</button>
+            ${canAuthor ? '<button class="app-nav-link" data-nav="create">Create</button>' : ''}
             ${isAdmin ? '<button class="app-nav-link" data-nav="team">Team</button>' : ''}
           </nav>
         </div>
@@ -152,6 +155,9 @@ export function routeByRole(mount, role, { email, onSignOut } = {}) {
     if (btn.dataset.nav === 'team') {
       setActiveNav('team');
       renderAdminView(viewRoot, ctx);
+    } else if (btn.dataset.nav === 'create') {
+      setActiveNav('create');
+      renderCreateView(viewRoot, ctx);
     } else {
       setActiveNav('queue');
       renderQueueView(viewRoot, ctx);
@@ -240,6 +246,95 @@ async function renderQueueView(root, ctx = {}) {
     });
   } catch (err) {
     list.innerHTML = `<p class="view-error">Could not load the queue: ${esc(err.message)}</p>`;
+  }
+}
+
+// ── Create view: an editor/admin authors their OWN levels ────────────────────
+// The "Create" tab (editors & admins only). It does two things: start a brand-new
+// draft, and list the levels this user has authored so they can reopen them. Both
+// open the SAME editing view the queue uses — the composer superset — but flagged
+// so it starts in the composer (Edit) and its Back button returns here. The
+// author's forward actions (Submit for review, and — admins — Publish now) live in
+// that view's decision bar. RLS + the transition trigger are the real gate; this
+// tab is just the entry point.
+async function renderCreateView(root, ctx = {}) {
+  root.classList.remove('is-wide');
+  const isAdmin = ctx.role === 'admin';
+  root.innerHTML = `
+    <section class="view">
+      <div class="view-header">
+        <h2>Create a level</h2>
+        <button id="btn-new-level" class="btn-primary btn-sm">
+          <i class="fa-solid fa-plus"></i> New level
+        </button>
+      </div>
+      <p class="view-hint">Author a Relink yourself, then submit it to the review queue${
+        isAdmin ? ' — or, as an admin, publish it straight to Puzzlr' : ''
+      }.</p>
+      <div id="mine-list" class="queue-groups">Loading…</div>
+    </section>`;
+
+  const newBtn = root.querySelector('#btn-new-level');
+  const list = root.querySelector('#mine-list');
+  let mine = [];
+
+  function openAuthoring(item) {
+    renderEditingView(root, item, ctx, { startMode: 'edit', backTo: 'create' });
+  }
+
+  // Build the editing-view `item` for one of my puzzles. author is self (used by
+  // the nav title); the rest mirrors the queue's item shape.
+  function toItem(p) {
+    return {
+      id: p.id,
+      state: p.state,
+      title: p.title,
+      publish_date: p.publish_date,
+      author: { display_name: ctx.email },
+    };
+  }
+
+  newBtn.addEventListener('click', async () => {
+    newBtn.disabled = true;
+    newBtn.textContent = 'Creating…';
+    try {
+      const draft = await createDraft();
+      openAuthoring({
+        id: draft.id, state: 'draft', title: draft.name || null,
+        publish_date: draft.date || null, author: { display_name: ctx.email },
+      });
+    } catch (err) {
+      newBtn.disabled = false;
+      newBtn.innerHTML = '<i class="fa-solid fa-plus"></i> New level';
+      list.innerHTML = `<p class="view-error">Could not create a draft: ${esc(err.message)}</p>`;
+    }
+  });
+
+  list.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-open-id]');
+    if (!btn) return;
+    const p = mine.find((x) => x.id === btn.dataset.openId);
+    if (p) openAuthoring(toItem(p));
+  });
+
+  try {
+    mine = await getMyDrafts();
+    if (!mine.length) {
+      list.innerHTML = `<p class="view-empty">You haven't created any levels yet. Click “New level” to start.</p>`;
+      return;
+    }
+    const rows = mine.map((p) => `
+      <div class="view-row">
+        <span class="view-row-title">${esc(p.title || 'Untitled level')}</span>
+        <span class="view-row-claim">${esc(STATE_LABEL[p.state] || p.state)}</span>
+        <span class="view-row-date">${esc(p.publish_date || '—')}</span>
+        <span class="view-row-action">
+          <button class="btn-play" data-open-id="${esc(p.id)}">Open</button>
+        </span>
+      </div>`).join('');
+    list.innerHTML = `<div class="view-list">${rows}</div>`;
+  } catch (err) {
+    list.innerHTML = `<p class="view-error">Could not load your levels: ${esc(err.message)}</p>`;
   }
 }
 
@@ -683,9 +778,13 @@ async function renderReviewView(root, item, ctx = {}) {
 // db.saveDraft and does NOT move the puzzle between states. Editors/admins may edit
 // ANY puzzle — the is_editor_plus() RLS policies are the gate, so there is no extra
 // access logic here.
-async function renderEditingView(root, item, ctx = {}) {
+async function renderEditingView(root, item, ctx = {}, opts = {}) {
   root.classList.add('is-wide');
   const puzzleId = item.id;
+  const { startMode = 'play', backTo = 'queue' } = opts;
+  // Was this opened from the author's "Create" tab? If so the decision bar shows
+  // the author's forward actions (Submit / Publish now) and Back returns there.
+  const fromCreate = backTo === 'create';
 
   let game = null;
   let mode = 'play';        // 'play' (game) is the default | 'edit' (composer)
@@ -697,7 +796,7 @@ async function renderEditingView(root, item, ctx = {}) {
     <section class="review-view">
       <div class="review-nav">
         <div class="review-nav-left">
-          <button id="btn-back" class="btn-ghost btn-sm">← Queue</button>
+          <button id="btn-back" class="btn-ghost btn-sm">← ${fromCreate ? 'My levels' : 'Queue'}</button>
           <span id="review-nav-title" class="review-nav-title">${navTitleHtml(item)}</span>
         </div>
         <div class="review-nav-right">
@@ -756,7 +855,7 @@ async function renderEditingView(root, item, ctx = {}) {
   function leaveToQueue() {
     window.removeEventListener('message', onMessage);
     if (game) { game.destroy(); game = null; }
-    renderQueueView(root, ctx);
+    (fromCreate ? renderCreateView : renderQueueView)(root, ctx);
   }
   root.querySelector('#btn-back').addEventListener('click', leaveToQueue);
 
@@ -784,7 +883,11 @@ async function renderEditingView(root, item, ctx = {}) {
       decisions.querySelector('#d-ready').addEventListener('click', () =>
         runTransition(() => markReady(puzzleId)));
     } else if (item.state === 'changes_requested') {
-      decisions.innerHTML = `<span class="decision-note">Sent back — awaiting the writer</span>`;
+      if (fromCreate) {
+        renderAuthorActions();
+      } else {
+        decisions.innerHTML = `<span class="decision-note">Sent back — awaiting the writer</span>`;
+      }
     } else if (item.state === 'ready') {
       decisions.innerHTML = `
         <button id="d-back" class="btn-danger-ghost btn-sm">Send back</button>
@@ -796,6 +899,8 @@ async function renderEditingView(root, item, ctx = {}) {
       decisions.innerHTML = `<span class="decision-note">Published${
         item.puzzlrLevelId ? ` — level ${esc(item.puzzlrLevelId)}` : ''
       }</span>`;
+    } else if (item.state === 'draft' && fromCreate) {
+      renderAuthorActions();
     } else {
       decisions.innerHTML = '';
     }
@@ -807,6 +912,77 @@ async function renderEditingView(root, item, ctx = {}) {
       del.textContent = 'Delete';
       del.addEventListener('click', runDelete);
       decisions.appendChild(del);
+    }
+  }
+
+  // The author's forward controls, shown when this puzzle was opened from the
+  // "Create" tab and is still in the author's hands (draft / changes_requested).
+  // Submit hands it to the review queue; Publish now (admin only) fast-tracks it
+  // all the way to Puzzlr. Both require a clean save first — you can't ship
+  // unsaved edits.
+  function renderAuthorActions() {
+    decisions.innerHTML = `
+      <button id="d-submit" class="btn-primary btn-sm">Submit for review</button>
+      ${isAdmin ? '<button id="d-fasttrack" class="btn-primary btn-sm">Publish now</button>' : ''}`;
+    decisions.querySelector('#d-submit').addEventListener('click', runSubmit);
+    const ft = decisions.querySelector('#d-fasttrack');
+    if (ft) ft.addEventListener('click', () => runFastTrack());
+  }
+
+  // Guard: forward actions must not ship unsaved composer edits. `dirty` is kept
+  // current by the composer bridge (relink:dirty / relink:saved).
+  function ensureSaved() {
+    if (dirty) {
+      showMsg('Save your changes before submitting.', true);
+      return false;
+    }
+    return true;
+  }
+
+  // Author: hand the draft to the review queue (draft/changes_requested ->
+  // submitted). Once submitted the author can no longer edit it, so we leave back
+  // to the "Create" list where it now shows as "Submitted".
+  async function runSubmit() {
+    if (!ensureSaved()) return;
+    decisions.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    editMsg.hidden = true;
+    try {
+      await submitPuzzle(puzzleId);
+      leaveToQueue();
+    } catch (err) {
+      decisions.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+      showMsg(err.message, true);
+    }
+  }
+
+  // Admin: fast-track a self-authored draft straight to live, walking the ordinary
+  // transitions (submit -> claim -> ready -> publish) in one action. Mirrors
+  // runPublish's live-date force retry: a past-date guard offers the admin an
+  // override; other failures surface verbatim (and leave the puzzle resumable in
+  // whatever state it reached).
+  async function runFastTrack({ force = false } = {}) {
+    if (!ensureSaved()) return;
+    decisions.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    editMsg.hidden = true;
+    showMsg('Publishing to Puzzlr…');
+    try {
+      const res = await fastTrackPublish(puzzleId, { allowLive: force });
+      item.state = 'published';
+      if (res?.levelId) item.puzzlrLevelId = res.levelId;
+      statePill.textContent = STATE_LABEL[item.state] || item.state;
+      root.querySelector('#review-nav-title').innerHTML = navTitleHtml(item);
+      renderDecisions();
+      showMsg(res?.levelId ? `Published to Puzzlr (level ${res.levelId}).` : 'Published to Puzzlr.');
+    } catch (err) {
+      decisions.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+      if (err.liveGuard && err.isAdmin && !force) {
+        if (confirm(`${err.message}\n\nForce-publish over this live date? (admin only)`)) {
+          return runFastTrack({ force: true });
+        }
+        showMsg('Publish cancelled.', false);
+        return;
+      }
+      showMsg(err.message, true);
     }
   }
 
@@ -966,8 +1142,14 @@ async function renderEditingView(root, item, ctx = {}) {
   tabPlay.addEventListener('click', () => setMode('play'));
   tabEdit.addEventListener('click', () => setMode('edit'));
 
-  // Start in Play, with the decisions rendered for the current state.
+  // Initial mode + decisions. Fresh drafts (opened from "Create") start straight
+  // in the composer — an empty board isn't playable — while the review flows keep
+  // Play as the spoiler-free default.
   renderDecisions();
-  mountPlay();
+  if (startMode === 'edit') {
+    setMode('edit');
+  } else {
+    mountPlay();
+  }
 }
 

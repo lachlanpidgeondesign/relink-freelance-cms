@@ -569,6 +569,48 @@ export async function publishPuzzle(puzzleId, { allowLive = false } = {}) {
   return data; // { ok, levelId, state }
 }
 
+// Admin fast-track: take a puzzle the admin AUTHORED all the way from draft to
+// live in one go, by walking the ordinary transitions in order
+// (draft/changes_requested -> submitted -> in_review -> ready -> published). It
+// is not a new transition and grants no new power — each step is the same
+// RLS/trigger-gated move the review pipeline uses, just run back-to-back so an
+// admin authoring their own level need not shepherd it through the queue by hand.
+//
+// Because the steps are separate updates, a failure part-way leaves the puzzle in
+// whatever state it reached (resumable from the Queue). We surface which step
+// failed so the UI can say so; the final publish keeps publishPuzzle's liveGuard/
+// isAdmin flags intact for the force-over-live retry.
+export async function fastTrackPublish(puzzleId, { allowLive = false } = {}) {
+  // Where are we starting from? Only the two author states are valid entry points.
+  const { data: cur, error: readErr } = await supabase
+    .from('puzzles')
+    .select('state')
+    .eq('id', puzzleId)
+    .single();
+  if (readErr) throw readErr;
+
+  const startedFrom = cur.state;
+  if (!['draft', 'changes_requested'].includes(startedFrom)) {
+    throw new Error(`Fast-track can only start from a draft (this puzzle is "${startedFrom}").`);
+  }
+
+  const step = async (label, fn) => {
+    try {
+      return await fn();
+    } catch (err) {
+      err.message = `${label} failed: ${err.message}`;
+      throw err;
+    }
+  };
+
+  await step('Submitting', () => submitPuzzle(puzzleId));
+  await step('Claiming', () => claimPuzzle(puzzleId));
+  await step('Marking ready', () => markReady(puzzleId));
+  // publishPuzzle already throws with liveGuard/isAdmin set; let it propagate as-is
+  // so the caller can offer the admin force-over-live retry.
+  return publishPuzzle(puzzleId, { allowLive });
+}
+
 // Admin: delete any puzzle outright (an escape hatch for spam/mistakes, in any
 // state). RLS gates this to admins via the `puzzles_admin_delete` policy; the
 // cascade drops the puzzle's rows, tiles, comments and history. We re-read the

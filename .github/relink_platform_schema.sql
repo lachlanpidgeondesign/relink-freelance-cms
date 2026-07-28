@@ -331,7 +331,7 @@ begin
   -- transitions; editors and admin publish forward. Force-over-live is NOT a
   -- state transition — it's a push-time guard in the Edge Function, admin-only.
   if    (old.state, new.state) = ('draft','submitted')
-        and r = 'writer' and old.author_id = auth.uid() then null;
+        and old.author_id = auth.uid() and r in ('writer','editor','admin') then null;
   elsif (old.state, new.state) = ('submitted','in_review')
         and r in ('reviewer','editor','admin') then null;
   elsif (old.state, new.state) = ('in_review','changes_requested')
@@ -339,7 +339,7 @@ begin
   elsif (old.state, new.state) = ('in_review','ready')
         and r in ('reviewer','editor','admin') then null;
   elsif (old.state, new.state) = ('changes_requested','submitted')
-        and r = 'writer' and old.author_id = auth.uid() then null;
+        and old.author_id = auth.uid() and r in ('writer','editor','admin') then null;
   elsif (old.state, new.state) = ('ready','published')
         and r in ('editor','admin') then null;
   elsif (old.state, new.state) = ('ready','changes_requested')
@@ -446,6 +446,10 @@ create policy puzzles_writer_read on puzzles
   for select using (author_id = auth.uid());
 create policy puzzles_writer_insert on puzzles
   for insert with check (author_id = auth.uid() and current_app_role() = 'writer');
+-- Editors/admins may also create their OWN puzzles (the "Create a level" tab).
+-- Owner-scoped: author_id must be the caller, so staff author as themselves.
+create policy puzzles_editor_insert on puzzles
+  for insert with check (author_id = auth.uid() and is_editor_plus());
 create policy puzzles_writer_update on puzzles
   for update using (author_id = auth.uid()
                     and state in ('draft','changes_requested'))
