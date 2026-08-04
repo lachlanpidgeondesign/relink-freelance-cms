@@ -442,6 +442,18 @@ export async function inviteUser(email, role) {
   return data; // { ok, email }
 }
 
+// Create a new user with a temporary password. Admin-only. The temp password is
+// returned so the admin can relay it via a second channel (Teams/Slack). The user
+// is forced to change their password on first sign-in.
+export async function createUser(email, role) {
+  const { data, error } = await supabase.functions.invoke('admin-create-user', {
+    body: { email, role },
+  });
+  if (error) throw await unwrapFunctionError(error);
+  if (data?.error) throw new Error(data.error);
+  return data; // { ok, email, tempPassword }
+}
+
 // Change a user's role. The `profiles_admin_write` RLS policy is the real gate
 // (admins only); a DB trigger additionally refuses to demote the last admin. A
 // blocked update surfaces as a thrown error for the UI to display.

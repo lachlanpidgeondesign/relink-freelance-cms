@@ -20,7 +20,7 @@ import {
   getComments, addComment, getBounceBacks,
   adminDeletePuzzle, publishPuzzle,
   createDraft, getMyDrafts, submitPuzzle, fastTrackPublish,
-  listUsers, inviteUser, updateUserRole, USER_ROLES,
+  listUsers, inviteUser, createUser, updateUserRole, USER_ROLES,
 } from './db.js';
 import { mountRelinkGame } from '../relink-game/relink-game.js';
 
@@ -359,7 +359,7 @@ async function renderAdminView(root, ctx = {}) {
       <div class="view-header"><h2>Team</h2></div>
 
       <div class="admin-panel">
-        <h3 class="admin-subhead">Invite a new person</h3>
+        <h3 class="admin-subhead">Create a new user</h3>
         <form id="invite-form" class="admin-invite" autocomplete="off">
           <input id="invite-email" class="admin-input" type="email" required
                  placeholder="name@example.com" aria-label="Email address">
@@ -368,9 +368,17 @@ async function renderAdminView(root, ctx = {}) {
               `<option value="${esc(r)}"${r === 'writer' ? ' selected' : ''}>${esc(roleLabel(r))}</option>`,
             ).join('')}
           </select>
-          <button type="submit" class="btn-primary btn-sm">Send invite</button>
+          <button type="submit" class="btn-primary btn-sm">Create user</button>
         </form>
         <p id="invite-msg" class="admin-msg" role="status" aria-live="polite" hidden></p>
+        <div id="temp-pw-result" hidden style="margin-top:12px; padding:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
+          <p style="margin:0 0 6px; font-size:13px; font-weight:600; color:#15803d;">Account created successfully</p>
+          <p style="margin:0 0 8px; font-size:13px; color:var(--muted);">Send this temporary password to the user via Teams or Slack. They will be asked to set their own password on first sign-in.</p>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <code id="temp-pw-value" style="flex:1; padding:8px 10px; background:var(--card); border:1px solid var(--border); border-radius:6px; font-size:14px; user-select:all;"></code>
+            <button type="button" id="temp-pw-copy" class="btn-ghost btn-sm">Copy</button>
+          </div>
+        </div>
       </div>
 
       <div class="admin-panel">
@@ -471,7 +479,18 @@ async function renderAdminView(root, ctx = {}) {
     }
   });
 
-  // ── Invite a new person ────────────────────────────────────────────────────
+  // ── Create a new user ──────────────────────────────────────────────────────
+  const tempPwResult = root.querySelector('#temp-pw-result');
+  const tempPwValue = root.querySelector('#temp-pw-value');
+  const tempPwCopy = root.querySelector('#temp-pw-copy');
+
+  tempPwCopy.addEventListener('click', () => {
+    navigator.clipboard.writeText(tempPwValue.textContent).then(() => {
+      tempPwCopy.textContent = 'Copied!';
+      setTimeout(() => { tempPwCopy.textContent = 'Copy'; }, 2000);
+    });
+  });
+
   inviteForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = inviteEmail.value.trim();
@@ -479,13 +498,16 @@ async function renderAdminView(root, ctx = {}) {
     if (!email) { setInviteMsg('Enter an email address.', 'error'); return; }
     const btn = inviteForm.querySelector('button[type="submit"]');
     btn.disabled = true;
-    setInviteMsg('Sending invite…', 'info');
+    tempPwResult.hidden = true;
+    setInviteMsg('Creating user…', 'info');
     try {
-      await inviteUser(email, invRole);
-      setInviteMsg(`Invite sent to ${email}.`, 'ok');
+      const result = await createUser(email, invRole);
+      setInviteMsg(`Account created for ${email}.`, 'ok');
+      tempPwValue.textContent = result.tempPassword;
+      tempPwResult.hidden = false;
       inviteEmail.value = '';
       inviteRole.value = 'writer';
-      loadUsers(); // the invited user now shows up in the list
+      loadUsers();
     } catch (err) {
       setInviteMsg(err.message, 'error');
     } finally {

@@ -145,11 +145,12 @@ export function renderAuthView(mount) {
 // a password before using the app. main.js detects the link type and renders
 // this; on success it calls `onDone`, which routes the now-ready user onward.
 export function renderSetPasswordView(mount, { mode = 'invite', email, onDone } = {}) {
-  const isInvite = mode === 'invite';
-  const title = isInvite ? 'Welcome to Relink' : 'Reset your password';
-  const subtitle = isInvite
-    ? 'Set a password to finish setting up your account.'
-    : 'Choose a new password for your account.';
+  const titles = {
+    invite: ['Welcome to Relink', 'Set a password to finish setting up your account.'],
+    recovery: ['Reset your password', 'Choose a new password for your account.'],
+    first_login: ['Set your password', 'Please set a new password to continue. Your temporary password cannot be used after this.'],
+  };
+  const [title, subtitle] = titles[mode] || titles.invite;
 
   mount.innerHTML = `
     <div class="auth-screen">
@@ -160,15 +161,15 @@ export function renderSetPasswordView(mount, { mode = 'invite', email, onDone } 
           ${email ? `<p class="auth-account">Signing in as <strong>${email}</strong></p>` : ''}
           <label class="auth-label" for="pw-new">New password</label>
           <input id="pw-new" class="auth-input" type="password" name="new-password"
-                 autocomplete="new-password" required placeholder="••••••••" minlength="6">
+                 autocomplete="new-password" required placeholder="••••••••" minlength="10">
 
           <label class="auth-label" for="pw-confirm">Confirm password</label>
           <input id="pw-confirm" class="auth-input" type="password" name="confirm-password"
-                 autocomplete="new-password" required placeholder="••••••••" minlength="6">
+                 autocomplete="new-password" required placeholder="••••••••" minlength="10">
 
           <div class="auth-actions">
             <button type="submit" id="pw-submit" class="auth-btn auth-btn-primary">
-              ${isInvite ? 'Set password & continue' : 'Update password'}
+              ${mode === 'invite' || mode === 'first_login' ? 'Set password & continue' : 'Update password'}
             </button>
           </div>
           <p id="pw-message" class="auth-message" role="status" aria-live="polite"></p>
@@ -191,13 +192,15 @@ export function renderSetPasswordView(mount, { mode = 'invite', email, onDone } 
     e.preventDefault();
     const pw = newEl.value;
     const confirm = confirmEl.value;
-    if (pw.length < 6) { setMessage('Password must be at least 6 characters.', 'error'); return; }
-    if (pw !== confirm) { setMessage('Those passwords don’t match.', 'error'); return; }
+    if (pw.length < 10) { setMessage('Password must be at least 10 characters.', 'error'); return; }
+    if (pw !== confirm) { setMessage('Those passwords don\u2019t match.', 'error'); return; }
 
     submitBtn.disabled = true;
     setMessage('Saving…', 'info');
     try {
       await updatePassword(pw);
+      // Clear the must_change_password flag so subsequent logins go straight in.
+      await supabase.auth.updateUser({ data: { must_change_password: false } });
       setMessage('Password set. Taking you in…', 'info');
       onDone?.();
     } catch (err) {

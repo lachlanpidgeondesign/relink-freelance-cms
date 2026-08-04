@@ -31,6 +31,11 @@ function showLoading(text = 'Loading…') {
 async function showApp(session) {
   showLoading();
   try {
+    // Force password change for users created with a temporary password.
+    if (session.user?.user_metadata?.must_change_password) {
+      showSetPassword(session, 'first_login');
+      return;
+    }
     const role = await getCurrentUserRole();
     routeByRole(mount, role, {
       email: session.user?.email,
@@ -66,8 +71,8 @@ function showAuth() {
 // Invite / recovery: let the user set a password, then route them onward. The
 // role was assigned server-side at invite time, so we clear the role cache and
 // re-fetch a fresh session before routing.
-function showSetPassword(session) {
-  const mode = _authAction === 'recovery' ? 'recovery' : 'invite';
+function showSetPassword(session, overrideMode) {
+  const mode = overrideMode || (_authAction === 'recovery' ? 'recovery' : 'invite');
   // Drop the token hash from the address bar so a refresh doesn't re-trigger.
   history.replaceState(null, document.title, window.location.pathname + window.location.search);
   renderSetPasswordView(mount, {

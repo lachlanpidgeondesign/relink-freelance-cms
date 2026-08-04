@@ -22,3 +22,9 @@ verify_jwt = true
 # JWT verification ON. Admin-only. Reads emails/join dates from auth.users via the
 # service-role key — data RLS cannot expose to the browser.
 verify_jwt = true
+
+[functions.admin-create-user]
+# JWT verification ON. Admin-only. Creates a user with a temporary password and
+# assigns their role. Returns the temp password to the admin (shown once). Avoids
+# reliance on clickable invite links that corporate email scanners consume.
+verify_jwt = true
