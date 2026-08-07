@@ -15,7 +15,7 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from './cors.ts';
 
-export const VALID_ROLES = ['writer', 'reviewer', 'editor', 'admin'];
+export const VALID_ROLES = ['writer', 'reviewer', 'editor', 'admin', 'guess_who_writer'];
 
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

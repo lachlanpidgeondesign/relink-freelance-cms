@@ -403,7 +403,7 @@ export function clearRoleCache() {
 // ── Admin: user & role management ────────────────────────────────────────────
 // The set of assignable roles, in ascending privilege order. Shared with the
 // admin UI so the dropdowns and the schema's user_role enum stay in lockstep.
-export const USER_ROLES = ['writer', 'reviewer', 'editor', 'admin'];
+export const USER_ROLES = ['writer', 'reviewer', 'editor', 'admin', 'guess_who_writer'];
 
 // supabase.functions.invoke() surfaces a non-2xx as a FunctionsHttpError whose
 // real JSON body ({ error }) hangs off error.context — dig out the message so

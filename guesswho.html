@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relink — Guess Who</title>
+  <link rel="preconnect" href="https://fonts.bunny.net" crossorigin>
+  <link href="https://fonts.bunny.net/css?family=plus-jakarta-sans:400,500,600,700" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <main id="guesswho-root">
+    <h1>Guess Who</h1>
+  </main>
+
+  <script type="module">
+    // Auth bootstrap — mirrors the composer's pattern (js/app.js init()): require a
+    // session, otherwise bounce to the platform sign-in. The real security boundary
+    // is RLS; this is convenience gating only (see the header comment in
+    // js/platform/router.js — routing decides which screen to show, not what data
+    // anyone may touch).
+    import { getSession } from './js/platform/auth.js';
+    import { getCurrentUserRole } from './js/platform/db.js';
+
+    const session = await getSession();
+    if (!session) { location.replace('platform.html'); }
+    else {
+      // This page is for guess_who_writer. Admins may reach it directly by URL for
+      // testing (they still land on the queue shell by default via routeByRole).
+      // Anyone else is routed back through the platform, which sends them to their
+      // correct home — the same window.location.replace pattern routeByRole uses.
+      const role = await getCurrentUserRole();
+      if (role !== 'guess_who_writer' && role !== 'admin') {
+        location.replace('platform.html');
+      }
+    }
+  </script>
+</body>
+</html>

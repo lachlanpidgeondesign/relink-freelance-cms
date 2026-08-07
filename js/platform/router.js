@@ -105,6 +105,15 @@ function navTitleHtml(item) {
 // Route the signed-in user by role. Writers go to the full composer; staff get
 // the queue shell rendered into `mount`. `onSignOut` handles staff sign-out.
 export function routeByRole(mount, role, { email, onSignOut } = {}) {
+  // Guess Who writers author for a SEPARATE game on their own standalone page.
+  // This is a distinct axis, not part of the writer/reviewer/editor/admin
+  // progression, so it's checked BEFORE the non-staff redirect below (otherwise
+  // a guess_who_writer — not in STAFF_ROLES — would fall through to composer.html).
+  if (role === 'guess_who_writer') {
+    window.location.replace('guesswho.html');
+    return;
+  }
+
   if (!STAFF_ROLES.includes(role)) {
     // Writers use the composer at composer.html (its own drafts sidebar + editor).
     window.location.replace('composer.html');
