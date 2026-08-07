@@ -6,13 +6,11 @@
   <title>Relink — Guess Who</title>
   <link rel="preconnect" href="https://fonts.bunny.net" crossorigin>
   <link href="https://fonts.bunny.net/css?family=plus-jakarta-sans:400,500,600,700" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/guesswho.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
-  <main id="guesswho-root">
-    <h1>Guess Who</h1>
-  </main>
+  <div id="guesswho-root"><div class="app-loading">Loading…</div></div>
 
   <script type="module">
     // Auth bootstrap — mirrors the composer's pattern (js/app.js init()): require a
@@ -22,10 +20,20 @@
     // anyone may touch).
     import { getSession } from './js/platform/auth.js';
     import { getCurrentUserRole } from './js/platform/db.js';
+    import { listGames } from './js/platform/gw-db.js';
+    import { esc } from './js/platform/dom.js';
 
+    // Where a published game lives. Placeholder until the player URL is known.
+    const GAME_BASE_URL = 'PLACEHOLDER';
+    const GAME_URL = (slug) => `${GAME_BASE_URL}?game=${slug}`;
+
+    const mount = document.getElementById('guesswho-root');
+
+    // ── Gate ──────────────────────────────────────────────────────────────────
     const session = await getSession();
-    if (!session) { location.replace('platform.html'); }
-    else {
+    if (!session) {
+      location.replace('platform.html');
+    } else {
       // This page is for guess_who_writer. Admins may reach it directly by URL for
       // testing (they still land on the queue shell by default via routeByRole).
       // Anyone else is routed back through the platform, which sends them to their
@@ -33,6 +41,87 @@
       const role = await getCurrentUserRole();
       if (role !== 'guess_who_writer' && role !== 'admin') {
         location.replace('platform.html');
+      } else {
+        renderGamesList(mount);
+      }
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────────
+    // Relative time (e.g. "2 hours ago"), no dependency — Intl.RelativeTimeFormat.
+    function fmtRelative(iso) {
+      if (!iso) return '';
+      const then = new Date(iso);
+      if (isNaN(then)) return '';
+      const secs = Math.round((Date.now() - then.getTime()) / 1000);
+      const abs = Math.abs(secs);
+      const rtf = new Intl.RelativeTimeFormat('en-GB', { numeric: 'auto' });
+      const units = [
+        ['year', 31536000], ['month', 2592000], ['week', 604800],
+        ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1],
+      ];
+      for (const [unit, s] of units) {
+        if (abs >= s || unit === 'second') return rtf.format(-Math.round(secs / s), unit);
+      }
+      return '';
+    }
+
+    function gameRow(g) {
+      const clueWarn = g.clueCount !== 3;
+      const clueLabel = `${g.clueCount} clue${g.clueCount === 1 ? '' : 's'}`;
+      return `
+        <div class="view-row">
+          <span class="view-row-title">${esc(g.answer || 'Untitled')}
+            <small class="view-row-submitted">Game ${esc(String(g.game_number))}</small>
+          </span>
+          <span class="view-row-state is-${esc(g.status)}">${esc(g.status)}</span>
+          <span class="view-row-clues${clueWarn ? ' is-warn' : ''}">${esc(clueLabel)}</span>
+          <span class="view-row-date">${esc(fmtRelative(g.updated_at))}</span>
+          <span class="view-row-action">
+            <button class="btn-ghost btn-sm" data-copy="${esc(g.slug)}"><i class="fa-solid fa-link"></i> Copy link</button>
+            <button class="btn-ghost btn-sm" data-edit="${esc(g.id)}" disabled><i class="fa-solid fa-pen-ruler"></i> Edit</button>
+          </span>
+        </div>`;
+    }
+
+    // Copy the game URL, then swap the button label to "Copied" for 2 seconds.
+    // No toast — platform.html has no toast system and this must not add one.
+    async function copyLink(btn) {
+      try { await navigator.clipboard.writeText(GAME_URL(btn.dataset.copy)); }
+      catch { /* clipboard blocked (permissions / insecure context) — ignore */ }
+      const original = btn.innerHTML;
+      btn.innerHTML = '<i class="fa-solid fa-link"></i> Copied';
+      btn.disabled = true;
+      setTimeout(() => { btn.innerHTML = original; btn.disabled = false; }, 2000);
+    }
+
+    // ── View ────────────────────────────────────────────────────────────────────
+    async function renderGamesList(root) {
+      root.innerHTML = `
+        <section class="app-view">
+          <div class="view-header">
+            <h2>Guess Who games</h2>
+            <button class="btn-primary btn-sm" id="gw-new" disabled><i class="fa-solid fa-plus"></i> New game</button>
+          </div>
+          <div id="gw-list" class="view-list">Loading…</div>
+        </section>`;
+
+      const list = root.querySelector('#gw-list');
+
+      // Copy handled via event delegation (matches router.js: closest('[data-*]')).
+      list.addEventListener('click', (e) => {
+        const copyBtn = e.target.closest('[data-copy]');
+        if (copyBtn) copyLink(copyBtn);
+      });
+
+      try {
+        const games = await listGames();
+        if (!games.length) {
+          list.innerHTML = `<p class="view-empty">No games yet.</p>`;
+          return;
+        }
+        list.innerHTML = games.map(gameRow).join('');
+      } catch (err) {
+        list.innerHTML = `<p class="view-error">Could not load games: ${esc(err.message)}</p>`;
       }
     }
   </script>
