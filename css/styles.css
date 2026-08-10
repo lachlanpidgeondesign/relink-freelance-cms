@@ -904,6 +904,17 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .row-bank-list { display: flex; flex-direction: column; gap: 10px; }
 .row-bank-empty { padding: 32px 16px; text-align: center; color: var(--muted-foreground); font-size: 14px; }
 
+/* ===== Play-test ===== */
+.play-modal { min-width: 0; width: 680px; max-width: 92vw; padding: 16px; }
+.play-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.play-modal-header h2 { margin-bottom: 0; }
+.play-modal-actions { display: flex; gap: 6px; }
+.play-status { font-size: 13px; color: var(--muted-foreground); min-height: 18px; margin-bottom: 8px; }
+.play-stage { width: 100%; max-width: 640px; margin: 0 auto; background: #fff; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.play-unplayable { padding: 28px 16px; text-align: center; color: var(--muted-foreground); font-size: 14px; }
+.play-unplayable ul { text-align: left; display: inline-block; margin: 12px auto 0; padding-left: 20px; }
+.play-unplayable li { margin: 4px 0; }
+
 .bank-row-card {
   border: 1px solid var(--border); border-radius: 8px; padding: 12px;
   background: var(--background);

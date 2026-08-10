@@ -87,7 +87,7 @@ export function renderAuthView(mount) {
   mount.innerHTML = `
     <div class="auth-screen">
       <div class="auth-card">
-        <h1 class="auth-title">Relink</h1>
+        <h1 class="auth-title">Puzzles</h1>
         <p class="auth-subtitle">Sign in to your account.</p>
         <form id="auth-form" class="auth-form" autocomplete="on">
           <label class="auth-label" for="auth-email">Email</label>
@@ -175,25 +175,27 @@ export function renderAuthView(mount) {
 
 // ── View: sign in with an email code ─────────────────────────────────────────
 // Passwordless entry for onboarding (and anyone without a usable password). The
-// user enters their email, receives a 6-digit code by email, and types it in. No
+// user enters their email, receives a numeric code by email, and types it in. No
 // clickable link is involved, so corporate mail scanners can't break the flow.
-// On success, onAuthChange (main.js) routes them onward — a brand-new user into
-// onboarding (set full name + password). `email` pre-fills from the sign-in view.
+// (The code length is a Supabase dashboard setting — 6 to 10 digits — so we don't
+// hard-code it here; we just require 6+ digits.) On success, onAuthChange
+// (main.js) routes them onward — a brand-new user into onboarding (set full name
+// + password). `email` pre-fills from the sign-in view.
 export function renderCodeSignInView(mount, { email = '' } = {}) {
   mount.innerHTML = `
     <div class="auth-screen">
       <div class="auth-card">
         <h1 class="auth-title">Sign in with a code</h1>
-        <p class="auth-subtitle">Enter your email, then the 6-digit code we email you. Been invited? Your code is in the invitation email.</p>
+        <p class="auth-subtitle">Enter your email, then the code we email you. Been invited? Your code is in the invitation email.</p>
         <form id="code-form" class="auth-form" autocomplete="off">
           <label class="auth-label" for="code-email">Email</label>
           <input id="code-email" class="auth-input" type="email" name="email"
                  autocomplete="email" required placeholder="you@example.com" value="${email}">
 
-          <label class="auth-label" for="code-token">6-digit code</label>
+          <label class="auth-label" for="code-token">Code from your email</label>
           <input id="code-token" class="auth-input" type="text" name="one-time-code"
                  inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*"
-                 maxlength="6" placeholder="123456">
+                 maxlength="10" placeholder="Enter the code">
 
           <div class="auth-actions">
             <button type="submit" id="code-verify" class="auth-btn auth-btn-primary">Verify &amp; continue</button>
@@ -227,7 +229,7 @@ export function renderCodeSignInView(mount, { email = '' } = {}) {
     setMessage('Sending a code…', 'info');
     try {
       await sendSignInCode(addr);
-      setMessage(`A 6-digit code is on its way to ${addr}. It expires after a while — request a new one if it stops working.`, 'info');
+      setMessage(`A code is on its way to ${addr}. It expires after a while — request a new one if it stops working.`, 'info');
       tokenEl.focus();
     } catch (err) {
       // Invite-only: an unknown email is refused. Keep the message generic so we
@@ -245,7 +247,7 @@ export function renderCodeSignInView(mount, { email = '' } = {}) {
     const addr = emailEl.value.trim();
     const token = tokenEl.value.trim();
     if (!addr) { setMessage('Enter your email.', 'error'); return; }
-    if (!/^\d{6}$/.test(token)) { setMessage('Enter the 6-digit code from your email.', 'error'); return; }
+    if (!/^\d{6,10}$/.test(token)) { setMessage('Enter the numeric code from your email.', 'error'); return; }
     verifyBtn.disabled = true;
     sendBtn.disabled = true;
     setMessage('Checking your code…', 'info');

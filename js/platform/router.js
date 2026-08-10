@@ -14,6 +14,7 @@
 // reached the "wrong" view still cannot read or write anything RLS forbids.
 // ============================================================================
 import { esc } from './dom.js';
+import { brandHtml, wireBrand } from './appbar.js';
 import {
   getQueue, getPuzzleForReview,
   claimPuzzle, markReady, bounceBack,
@@ -127,7 +128,7 @@ export function routeByRole(mount, role, { email, onSignOut } = {}) {
     <div class="app-shell">
       <header class="app-topbar">
         <div class="app-topbar-left">
-          <span class="app-brand">Relink</span>
+          ${brandHtml('relink', isAdmin)}
           <nav class="app-nav">
             <button class="app-nav-link is-active" data-nav="queue">Queue</button>
             ${canAuthor ? '<button class="app-nav-link" data-nav="create">Create</button>' : ''}
@@ -144,6 +145,7 @@ export function routeByRole(mount, role, { email, onSignOut } = {}) {
     </div>`;
 
   mount.querySelector('#btn-signout').addEventListener('click', () => onSignOut?.());
+  wireBrand(mount.querySelector('.app-topbar'));
 
   const viewRoot = mount.querySelector('#view-root');
   const nav = mount.querySelector('.app-nav');
@@ -502,7 +504,7 @@ async function renderAdminView(root, ctx = {}) {
       setInviteMsg('', 'info');
       inviteMsg.hidden = true;
       inviteResultText.textContent =
-        `${email} will receive an email with a 6-digit sign-in code. They open the platform, choose “Sign in with a code”, enter the code, then set their name and password.`;
+        `${email} will receive an email with a sign-in code. They open the platform, choose “Sign in with a code”, enter the code, then set their name and password.`;
       inviteResult.hidden = false;
       inviteEmail.value = '';
       inviteRole.value = 'writer';

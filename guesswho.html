@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Relink — Guess Who</title>
+  <title>Puzzles — Guess Who</title>
   <link rel="preconnect" href="https://fonts.bunny.net" crossorigin>
   <link href="https://fonts.bunny.net/css?family=plus-jakarta-sans:400,500,600,700" rel="stylesheet">
   <link rel="stylesheet" href="css/guesswho.css">
@@ -18,16 +18,21 @@
     // is RLS; this is convenience gating only (see the header comment in
     // js/platform/router.js — routing decides which screen to show, not what data
     // anyone may touch).
-    import { getSession } from './js/platform/auth.js';
-    import { getCurrentUserRole } from './js/platform/db.js';
+    import { getSession, signOut } from './js/platform/auth.js';
+    import { getCurrentUserRole, clearRoleCache } from './js/platform/db.js';
     import { listGames, getGame, nextGameNumber, createGame, saveGame, setGameStatus } from './js/platform/gw-db.js';
     import { esc } from './js/platform/dom.js';
+    import { brandHtml, wireBrand } from './js/platform/appbar.js';
 
     // Where a published game lives.
     const GAME_BASE_URL = 'https://www.dailymail.com/i/html_modules/puzzles/guess-who/';
     const GAME_URL = (slug) => `${GAME_BASE_URL}?game=${slug}`;
 
     const mount = document.getElementById('guesswho-root');
+
+    // The persistent view container inside the shell. The topbar (brand switcher +
+    // sign out) stays put while the games list / editor re-render into here.
+    let viewRoot = null;
 
     // Warn before a hard navigation / tab close when the editor has unsaved work.
     // In-app navigation (Back button) is guarded separately with confirm().
@@ -48,8 +53,35 @@
       if (role !== 'guess_who_writer' && role !== 'admin') {
         location.replace('platform.html');
       } else {
-        renderGamesList(mount);
+        renderShell(mount, { role, email: session.user?.email });
       }
+    }
+
+    // ── Shell: topbar (brand switcher + sign out) + a persistent view root ──────
+    function renderShell(root, { role, email }) {
+      const isAdmin = role === 'admin';
+      root.innerHTML = `
+        <header class="app-topbar">
+          <div class="app-topbar-left">
+            ${brandHtml('guesswho', isAdmin)}
+          </div>
+          <div class="app-topbar-right">
+            <span class="app-user">${esc(email || '')}</span>
+            <span class="app-role-badge">${esc(role || 'unknown')}</span>
+            <button id="gw-signout" class="btn-ghost btn-sm">Sign out</button>
+          </div>
+        </header>
+        <main id="gw-view"></main>`;
+
+      wireBrand(root.querySelector('.app-topbar'));
+      root.querySelector('#gw-signout').addEventListener('click', async () => {
+        clearRoleCache();
+        await signOut();
+        location.replace('platform.html');
+      });
+
+      viewRoot = root.querySelector('#gw-view');
+      renderGamesList(viewRoot);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -114,14 +146,14 @@
       const list = root.querySelector('#gw-list');
 
       // "New game" opens the editor in create mode (no id yet).
-      root.querySelector('#gw-new').addEventListener('click', () => renderEditorView(mount, null));
+      root.querySelector('#gw-new').addEventListener('click', () => renderEditorView(viewRoot, null));
 
       // Copy handled via event delegation (matches router.js: closest('[data-*]')).
       list.addEventListener('click', (e) => {
         const copyBtn = e.target.closest('[data-copy]');
         if (copyBtn) { copyLink(copyBtn); return; }
         const editBtn = e.target.closest('[data-edit]');
-        if (editBtn) renderEditorView(mount, editBtn.dataset.edit);
+        if (editBtn) renderEditorView(viewRoot, editBtn.dataset.edit);
       });
 
       try {

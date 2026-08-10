@@ -15,6 +15,7 @@ import { connectDirectory, restoreDirectory, openPuzzle, savePuzzle, deletePuzzl
 import { doExportCurrentJSON, doExportAllJSON, doExportPDLSummary } from './export.js';
 import { getSession, signOut } from './platform/auth.js';
 import { isEditableState, getBounceBacks } from './platform/db.js';
+import { mountRelinkGame } from './relink-game/relink-game.js';
 
 // ── DOM refs ──
 const $ = id => document.getElementById(id);
@@ -875,6 +876,7 @@ document.addEventListener('click', e => {
   if (t.id === 'btn-undo' || t.closest('#btn-undo')) return doUndo();
   if (t.id === 'btn-redo' || t.closest('#btn-redo')) return doRedo();
   if (t.id === 'btn-save' || t.closest('#btn-save')) return handleSave();
+  if (t.id === 'btn-play' || t.closest('#btn-play')) return openPlayTest();
   if (t.id === 'btn-send' || t.closest('#btn-send')) return handleSend();
   if (t.id === 'btn-signout' || t.closest('#btn-signout')) return handleSignOut();
   if (t.id === 'btn-connect') return handleConnect();
@@ -884,6 +886,8 @@ document.addEventListener('click', e => {
   if (t.id === 'btn-refresh-index') return refreshIndex();
   if (t.id === 'export-close') return hideModal('export-modal');
   if (t.id === 'import-close') return hideModal('import-modal');
+  if (t.id === 'play-close' || t.closest('#play-close')) return closePlayTest();
+  if (t.id === 'play-restart' || t.closest('#play-restart')) return startPlayTest();
   if (t.id === 'schema-save') return handleSchemaSave();
   if (t.id === 'schema-reset') return handleSchemaReset();
 
@@ -1767,6 +1771,74 @@ function handleAddFodder() {
 
 function showModal(id) { $(id).style.display = ''; }
 function hideModal(id) { $(id).style.display = 'none'; }
+
+// ══════════════════════════════════════════
+//  PLAY-TEST
+//  Runs the real game engine (js/relink-game) on the in-memory puzzle so writers
+//  can play their draft before sending it to the editor. Purely client-side and
+//  non-mutating, so it's available even when the puzzle is read-only (in review).
+// ══════════════════════════════════════════
+let _playGame = null;
+
+// Surface the things that would stop the puzzle being playable, in writer-friendly
+// language, rather than mounting a half-built board.
+function getPlayTestIssues(puzzle) {
+  const issues = [];
+  const rows = puzzle?.rows || [];
+  if (rows.length < 4) issues.push(`The puzzle needs 4 rows (it currently has ${rows.length}).`);
+  rows.forEach((r, i) => {
+    const label = r.category?.trim() ? `“${r.category.trim()}”` : `Row ${i + 1}`;
+    const tiles = r.tiles || [];
+    const filled = tiles.filter(t => (t.text || '').trim()).length;
+    const impostors = tiles.filter(t => t.isImpostor).length;
+    if (filled < 4) issues.push(`${label} needs all 4 tiles filled in.`);
+    if (impostors !== 1) issues.push(`${label} must have exactly one impostor (it has ${impostors}).`);
+  });
+  const relinkTiles = puzzle?.relink?.tiles || [];
+  if (relinkTiles.length === 0) issues.push('The relink (Phase 2) answer has no tiles yet.');
+  return issues;
+}
+
+function startPlayTest() {
+  const stage = $('play-stage');
+  const statusEl = $('play-status');
+  if (_playGame) { try { _playGame.destroy(); } catch {} _playGame = null; }
+  stage.replaceChildren();
+
+  const puzzle = getState().puzzle;
+  if (!puzzle) {
+    statusEl.textContent = '';
+    stage.innerHTML = '<div class="play-unplayable">Open or create a puzzle first, then press Play-test.</div>';
+    return;
+  }
+
+  const issues = getPlayTestIssues(puzzle);
+  if (issues.length) {
+    statusEl.textContent = 'This puzzle isn’t ready to play yet.';
+    stage.innerHTML = `<div class="play-unplayable">
+      <i class="fa-solid fa-triangle-exclamation"></i> Fix these before play-testing:
+      <ul>${issues.map(i => `<li>${esc(i)}</li>`).join('')}</ul>
+    </div>`;
+    return;
+  }
+
+  statusEl.textContent = 'Find the impostor in each row, then build the relink answer.';
+  _playGame = mountRelinkGame(stage, puzzle, {
+    onComplete: () => { statusEl.textContent = 'Solved — this puzzle plays through correctly.'; },
+    onFail: () => { statusEl.textContent = 'Out of guesses — press Restart to try again.'; },
+  });
+}
+
+function openPlayTest() {
+  showModal('play-modal');
+  startPlayTest();
+}
+
+function closePlayTest() {
+  if (_playGame) { try { _playGame.destroy(); } catch {} _playGame = null; }
+  $('play-stage').replaceChildren();
+  hideModal('play-modal');
+}
 
 // ══════════════════════════════════════════
 //  ROW BANK

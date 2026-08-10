@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Relink CMS — Puzzle Design</title>
+  <title>Puzzles CMS — Puzzle Design</title>
   <link rel="preconnect" href="https://fonts.bunny.net" crossorigin>
   <link href="https://fonts.bunny.net/css?family=plus-jakarta-sans:400,500,600,700" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
@@ -16,7 +16,7 @@
     <!-- Header -->
     <header class="header app-header" id="header">
       <div class="header-left">
-        <span class="header-logo">Relink CMS</span>
+        <span class="header-logo">Puzzles CMS</span>
         <div class="header-divider"></div>
         <div class="header-breadcrumb" id="header-breadcrumb">
           <span class="current">Dashboard</span>
@@ -31,6 +31,7 @@
         <button class="btn-ghost-sm" id="btn-undo" title="Undo (Ctrl+Z)" disabled><i class="fa-solid fa-rotate-left"></i></button>
         <button class="btn-ghost-sm" id="btn-redo" title="Redo (Ctrl+Y)" disabled><i class="fa-solid fa-rotate-right"></i></button>
         <button class="btn-ghost-sm" id="btn-save"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+        <button class="btn-ghost-sm" id="btn-play" title="Play-test this puzzle before sending it to the editor"><i class="fa-solid fa-play"></i> Play-test</button>
         <button class="btn-ghost-sm" id="btn-send" title="Save and send this puzzle to the editor for review"><i class="fa-solid fa-paper-plane"></i> Send to editor</button>
         <div class="header-divider"></div>
         <span class="header-status" id="header-status">
@@ -119,7 +120,7 @@
     <main class="app-main" id="main-area">
       <div class="puzzle-editor" id="puzzle-editor">
         <div class="puzzle-editor-empty" id="editor-empty">
-          <h2>Relink Puzzle CMS</h2>
+          <h2>Puzzles CMS</h2>
           <p>Create a new puzzle or open one from the list to get started.</p>
           <button class="btn-primary" id="btn-new-empty">+ New Puzzle</button>
         </div>
@@ -280,6 +281,23 @@
       <div class="modal-footer">
         <button class="btn-ghost" id="displace-cancel">Cancel</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Play-test Modal — writers can play their own puzzle before sending it to the
+       editor. Runs the real game engine (js/relink-game) on the in-memory puzzle;
+       non-mutating, so it works even when the puzzle is read-only (in review). -->
+  <div class="modal-overlay" id="play-modal" style="display:none;">
+    <div class="modal play-modal">
+      <div class="play-modal-header">
+        <h2><i class="fa-solid fa-play"></i> Play-test</h2>
+        <div class="play-modal-actions">
+          <button class="btn-ghost-sm" id="play-restart" title="Restart the puzzle"><i class="fa-solid fa-rotate-left"></i> Restart</button>
+          <button class="btn-ghost-sm" id="play-close" title="Close"><i class="fa-solid fa-xmark"></i> Close</button>
+        </div>
+      </div>
+      <div class="play-status" id="play-status"></div>
+      <div class="play-stage" id="play-stage"></div>
     </div>
   </div>
 
