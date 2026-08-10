@@ -20,14 +20,20 @@
     // anyone may touch).
     import { getSession } from './js/platform/auth.js';
     import { getCurrentUserRole } from './js/platform/db.js';
-    import { listGames } from './js/platform/gw-db.js';
+    import { listGames, getGame, nextGameNumber, createGame, saveGame, setGameStatus } from './js/platform/gw-db.js';
     import { esc } from './js/platform/dom.js';
 
-    // Where a published game lives. Placeholder until the player URL is known.
-    const GAME_BASE_URL = 'PLACEHOLDER';
+    // Where a published game lives.
+    const GAME_BASE_URL = 'https://www.dailymail.com/i/html_modules/puzzles/guess-who/';
     const GAME_URL = (slug) => `${GAME_BASE_URL}?game=${slug}`;
 
     const mount = document.getElementById('guesswho-root');
+
+    // Warn before a hard navigation / tab close when the editor has unsaved work.
+    // In-app navigation (Back button) is guarded separately with confirm().
+    window.addEventListener('beforeunload', (e) => {
+      if (isDirty) { e.preventDefault(); e.returnValue = ''; }
+    });
 
     // ── Gate ──────────────────────────────────────────────────────────────────
     const session = await getSession();
@@ -78,7 +84,7 @@
           <span class="view-row-date">${esc(fmtRelative(g.updated_at))}</span>
           <span class="view-row-action">
             <button class="btn-ghost btn-sm" data-copy="${esc(g.slug)}"><i class="fa-solid fa-link"></i> Copy link</button>
-            <button class="btn-ghost btn-sm" data-edit="${esc(g.id)}" disabled><i class="fa-solid fa-pen-ruler"></i> Edit</button>
+            <button class="btn-ghost btn-sm" data-edit="${esc(g.id)}"><i class="fa-solid fa-pen-ruler"></i> Edit</button>
           </span>
         </div>`;
     }
@@ -100,17 +106,22 @@
         <section class="app-view">
           <div class="view-header">
             <h2>Guess Who games</h2>
-            <button class="btn-primary btn-sm" id="gw-new" disabled><i class="fa-solid fa-plus"></i> New game</button>
+            <button class="btn-primary btn-sm" id="gw-new"><i class="fa-solid fa-plus"></i> New game</button>
           </div>
           <div id="gw-list" class="view-list">Loading…</div>
         </section>`;
 
       const list = root.querySelector('#gw-list');
 
+      // "New game" opens the editor in create mode (no id yet).
+      root.querySelector('#gw-new').addEventListener('click', () => renderEditorView(mount, null));
+
       // Copy handled via event delegation (matches router.js: closest('[data-*]')).
       list.addEventListener('click', (e) => {
         const copyBtn = e.target.closest('[data-copy]');
-        if (copyBtn) copyLink(copyBtn);
+        if (copyBtn) { copyLink(copyBtn); return; }
+        const editBtn = e.target.closest('[data-edit]');
+        if (editBtn) renderEditorView(mount, editBtn.dataset.edit);
       });
 
       try {
@@ -123,6 +134,726 @@
       } catch (err) {
         list.innerHTML = `<p class="view-error">Could not load games: ${esc(err.message)}</p>`;
       }
+    }
+
+    // ── Editor view ─────────────────────────────────────────────────────────────
+    // The clue rows are fully editable and interactive (drag/keyboard reorder +
+    // image validation). Still no saving — that comes next. The three clues live
+    // in ONE module-scope array; the array index IS the position (index 0 = clue
+    // 1). It is the single source of truth: we never read clue values back out of
+    // the DOM. Rows re-render from the array; validation repaints in place.
+
+    // Image URLs must come from the Daily Mail media library.
+    const ALLOWED_IMAGE_HOSTS = ['.dailymail.co.uk', '.dailymail.com'];
+
+    // Single source of truth. Always exactly three clues; no add/remove.
+    //   { clueText, imageUrl, credit, width, height, error, warning, loading }
+    let clues = [];
+    // Reveal image validation state (mirrors a clue item's image fields).
+    let reveal = { imageUrl: '', width: null, height: null, error: null, warning: null, loading: false };
+    // Accepted-answer aliases, held as a plain array (same discipline as clues —
+    // the chips render FROM this array; we never read them back out of the DOM).
+    let acceptedAnswers = [];
+    let cluesContainer = null;   // the #gw-clue-cards element (fresh each editor render)
+    let editorEls = {};          // cached refs: buttons, message, reveal fields
+    let dragIndex = null;        // index being dragged, or null
+
+    // Editor session state (set on every renderEditorView).
+    let currentGameId = null;        // null ⇒ create mode (no row yet)
+    let currentGameStatus = 'draft'; // draft | review | live
+    let isDirty = false;             // unsaved changes since load/save?
+
+    // Inline save/status feedback — mirrors the platform's .admin-msg pattern
+    // (no toast system exists and we must not add one). kind = 'ok' | 'error'.
+    function showMsg(text, kind) {
+      const el = editorEls.msgEl;
+      if (!el) return;
+      el.className = 'admin-msg admin-msg-' + kind;
+      el.textContent = text;
+      el.hidden = false;
+    }
+    function clearMsg() {
+      const el = editorEls.msgEl;
+      if (el) el.hidden = true;
+    }
+
+    // Editable accepted-answer chips (tag input). Renders from acceptedAnswers.
+    function acceptedTagsHtml() {
+      const tags = acceptedAnswers.map((a, i) =>
+        `<span class="gw-tag">${esc(a)}<button type="button" class="gw-tag-x" data-remove-accepted="${i}" aria-label="Remove ${esc(a)}"><i class="fa-solid fa-xmark"></i></button></span>`).join('');
+      return `<div class="gw-tags" data-accepted>${tags}<input type="text" class="gw-tag-input" id="gw-accepted-input" placeholder="Add answer…"></div>`;
+    }
+
+    // Repaint the tag box from the array, then refocus the entry field so a run of
+    // additions stays fluent. Called only on commit/remove, never per keystroke.
+    function paintAccepted() {
+      const box = editorEls.acceptedBox;
+      if (!box) return;
+      box.innerHTML = acceptedAnswers.map((a, i) =>
+        `<span class="gw-tag">${esc(a)}<button type="button" class="gw-tag-x" data-remove-accepted="${i}" aria-label="Remove ${esc(a)}"><i class="fa-solid fa-xmark"></i></button></span>`).join('')
+        + `<input type="text" class="gw-tag-input" id="gw-accepted-input" placeholder="Add answer…">`;
+      box.querySelector('#gw-accepted-input')?.focus();
+    }
+
+    // Add a chip: trim, ignore empty, ignore case-insensitive duplicates.
+    function commitAccepted(raw) {
+      const v = (raw || '').trim();
+      if (!v) return;
+      if (acceptedAnswers.some((a) => a.toLowerCase() === v.toLowerCase())) return;
+      acceptedAnswers.push(v);
+      isDirty = true;
+    }
+
+    // ── Image URL validation ────────────────────────────────────────────────────
+    // Load a URL in a detached Image; resolves to {width,height} or null on error.
+    function loadImage(url) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        img.onerror = () => resolve(null);
+        img.referrerPolicy = 'no-referrer';
+        img.src = url;
+      });
+    }
+
+    // Shared by clue images AND the reveal image. Returns { error } (blocking),
+    // or { width, height, warning? } on success. `reference` (clue 1) drives the
+    // non-blocking aspect-ratio warning.
+    async function validateImageUrl(url, reference) {
+      let u;
+      try { u = new URL(url); } catch { return { error: 'Must be a full https:// URL.' }; }
+      if (u.protocol !== 'https:') return { error: 'Must be a full https:// URL.' };
+
+      const host = u.hostname.toLowerCase();
+      if (!ALLOWED_IMAGE_HOSTS.some((suffix) => host.endsWith(suffix))) {
+        return { error: 'Images must come from the Daily Mail media library. Upload the photo there first, then paste the link.' };
+      }
+
+      const dims = await loadImage(url);
+      if (!dims) return { error: "That image didn't load. Check the link — paths are case-sensitive." };
+
+      const out = { width: dims.width, height: dims.height };
+      if (reference && reference.width && reference.height && dims.width && dims.height) {
+        const r1 = reference.width / reference.height;
+        const r2 = dims.width / dims.height;
+        if (Math.abs(r2 - r1) / r1 > 0.15) {
+          out.warning = 'Different shape to clue 1 — the reveal may look uneven.';
+        }
+      }
+      return out;
+    }
+
+    // The game's framing = clue 1's aspect ratio. Used for every clue thumbnail so
+    // the editor previews the exact frame players see. Falls back before clue 1
+    // has a validated image.
+    function gameAspect() {
+      const c = clues[0];
+      return (c && c.width && c.height) ? `${c.width} / ${c.height}` : '3 / 4';
+    }
+
+    // ── Clue rows ────────────────────────────────────────────────────────────────
+    function clueHeading(i) {
+      return i === 0 ? 'Clue 1 — first shown' : i === 2 ? 'Clue 3 — last chance' : 'Clue 2';
+    }
+
+    function clueCardHtml(c, i) {
+      const heading = clueHeading(i);
+      const hasImg = c.imageUrl && !c.error;
+      return `
+        <div class="gw-clue-card" data-clue-index="${i}">
+          <div class="gw-clue-card-head">
+            <span class="gw-clue-handle" data-drag-handle draggable="true" title="Drag to reorder" aria-hidden="true"><i class="fa-solid fa-grip-vertical"></i></span>
+            <span class="gw-clue-heading">${esc(heading)}</span>
+            <span class="gw-clue-head-spacer"></span>
+            <button type="button" class="gw-move-btn" data-move="up" ${i === 0 ? 'disabled' : ''} aria-label="Move ${esc(heading)} earlier" title="Move up"><i class="fa-solid fa-arrow-up"></i></button>
+            <button type="button" class="gw-move-btn" data-move="down" ${i === 2 ? 'disabled' : ''} aria-label="Move ${esc(heading)} later" title="Move down"><i class="fa-solid fa-arrow-down"></i></button>
+          </div>
+          <div class="gw-field">
+            <label class="gw-label" for="gw-clue-text-${i}">Clue text</label>
+            <textarea class="gw-textarea" id="gw-clue-text-${i}" data-field="text" required placeholder="What players read for this clue…">${esc(c.clueText || '')}</textarea>
+          </div>
+          <div class="gw-clue-url-row">
+            <div class="gw-field">
+              <label class="gw-label" for="gw-clue-url-${i}">Image URL</label>
+              <input class="gw-input" id="gw-clue-url-${i}" data-field="url" type="text" required placeholder="https://i.dailymail.co.uk/…" value="${esc(c.imageUrl || '')}">
+              <p class="gw-field-error" data-error ${c.error ? '' : 'hidden'}>${esc(c.error || '')}</p>
+              <p class="gw-field-warning" data-warning ${c.warning ? '' : 'hidden'}>${esc(c.warning || '')}</p>
+            </div>
+            <div class="gw-img-thumb${c.loading ? ' is-loading' : ''}" data-thumb style="aspect-ratio:${gameAspect()}">
+              ${hasImg ? `<img src="${esc(c.imageUrl)}" alt="" referrerpolicy="no-referrer">` : ''}
+              ${c.loading ? '<span class="gw-thumb-spinner"><i class="fa-solid fa-spinner fa-spin"></i></span>' : ''}
+            </div>
+          </div>
+          <div class="gw-field">
+            <label class="gw-label" for="gw-clue-credit-${i}">Credit</label>
+            <input class="gw-input" id="gw-clue-credit-${i}" data-field="credit" type="text" required placeholder="e.g. REX/Shutterstock" value="${esc(c.credit || '')}">
+          </div>
+        </div>`;
+    }
+
+    // Full rebuild of the clue rows from the array. Used on load and after a
+    // reorder (which relabels the rows). Per-card validation uses paintClue().
+    function renderClueRows() {
+      cluesContainer.innerHTML = clues.map(clueCardHtml).join('');
+    }
+
+    // Repaint ONLY card i's thumbnail + error/warning from the array — leaves the
+    // inputs untouched so focus/caret survive an async validation completing.
+    function paintClue(i) {
+      const card = cluesContainer.querySelector(`[data-clue-index="${i}"]`);
+      if (!card) return;
+      const c = clues[i];
+      const thumb = card.querySelector('[data-thumb]');
+      if (thumb) {
+        thumb.className = 'gw-img-thumb' + (c.loading ? ' is-loading' : '');
+        thumb.style.aspectRatio = gameAspect();
+        const hasImg = c.imageUrl && !c.error;
+        thumb.innerHTML =
+          (hasImg ? `<img src="${esc(c.imageUrl)}" alt="" referrerpolicy="no-referrer">` : '') +
+          (c.loading ? '<span class="gw-thumb-spinner"><i class="fa-solid fa-spinner fa-spin"></i></span>' : '');
+      }
+      const errEl = card.querySelector('[data-error]');
+      if (errEl) { errEl.textContent = c.error || ''; errEl.hidden = !c.error; }
+      const warnEl = card.querySelector('[data-warning]');
+      if (warnEl) { warnEl.textContent = c.warning || ''; warnEl.hidden = !c.warning; }
+    }
+
+    // Keep every thumbnail framed at the current game (clue 1) ratio.
+    function applyAspectRatios() {
+      cluesContainer.querySelectorAll('[data-thumb]').forEach((t) => { t.style.aspectRatio = gameAspect(); });
+    }
+
+    // Clue 1 defines the reference shape, so whenever it changes recompute the
+    // aspect warnings for clues 2 & 3 (no image reload — dimensions are stored).
+    function recomputeWarnings() {
+      if (clues[0]) { clues[0].warning = null; paintClue(0); }
+      for (const i of [1, 2]) {
+        const c = clues[i];
+        if (!c) continue;
+        if (c.width && c.height && clues[0].width && clues[0].height && !c.error) {
+          const r1 = clues[0].width / clues[0].height;
+          const r2 = c.width / c.height;
+          c.warning = (Math.abs(r2 - r1) / r1 > 0.15) ? 'Different shape to clue 1 — the reveal may look uneven.' : null;
+        } else if (!c.width) {
+          c.warning = null;
+        }
+        paintClue(i);
+      }
+    }
+
+    // Validate clue i's image (paste/blur). Shows a loading state, then stores
+    // dimensions or a blocking error, then repaints and re-checks readiness.
+    async function validateClue(i) {
+      const c = clues[i];
+      const url = (c.imageUrl || '').trim();
+      if (!url) {
+        c.loading = false; c.error = null; c.warning = null; c.width = null; c.height = null;
+        paintClue(i); evaluateReadiness(); return;
+      }
+      c.loading = true; c.error = null; c.warning = null; c.width = null; c.height = null;
+      paintClue(i);
+
+      const res = await validateImageUrl(url, i > 0 ? clues[0] : null);
+      // Ignore a stale result if the field changed while we were loading.
+      if ((clues[i].imageUrl || '').trim() !== url) return;
+
+      c.loading = false;
+      c.error = res.error || null;
+      c.width = res.width || null;
+      c.height = res.height || null;
+      c.warning = res.warning || null;
+      paintClue(i);
+      if (i === 0) { recomputeWarnings(); applyAspectRatios(); }
+      evaluateReadiness();
+    }
+
+    // ── Reveal image (reuses the same validator) ─────────────────────────────────
+    function paintReveal() {
+      const t = editorEls.revealThumb;
+      if (t) {
+        t.className = 'gw-thumb' + (reveal.loading ? ' is-loading' : '');
+        const hasImg = reveal.imageUrl && !reveal.error;
+        t.innerHTML =
+          (hasImg ? `<img src="${esc(reveal.imageUrl)}" alt="" referrerpolicy="no-referrer">` : '') +
+          (reveal.loading ? '<span class="gw-thumb-spinner"><i class="fa-solid fa-spinner fa-spin"></i></span>' : '');
+      }
+      const e = editorEls.revealError;
+      if (e) { e.textContent = reveal.error || ''; e.hidden = !reveal.error; }
+      const w = editorEls.revealWarn;
+      if (w) { w.textContent = reveal.warning || ''; w.hidden = !reveal.warning; }
+    }
+
+    async function validateReveal() {
+      const url = (reveal.imageUrl || '').trim();
+      if (!url) {
+        reveal.loading = false; reveal.error = null; reveal.warning = null; reveal.width = null; reveal.height = null;
+        paintReveal(); evaluateReadiness(); return;
+      }
+      reveal.loading = true; reveal.error = null; reveal.warning = null; reveal.width = null; reveal.height = null;
+      paintReveal();
+
+      const res = await validateImageUrl(url, clues[0]);
+      if ((reveal.imageUrl || '').trim() !== url) return;
+
+      reveal.loading = false;
+      reveal.error = res.error || null;
+      reveal.width = res.width || null;
+      reveal.height = res.height || null;
+      reveal.warning = res.warning || null;
+      paintReveal(); evaluateReadiness();
+    }
+
+    // ── Ready-state gating ───────────────────────────────────────────────────────
+    // The only thing between a missing photo credit and a published game — there
+    // is no approval workflow, so this stays blocking. Warnings never count.
+    function evaluateReadiness() {
+      const missing = [];
+      clues.forEach((c, i) => {
+        const n = i + 1;
+        if (!(c.clueText && c.clueText.trim())) missing.push(`clue ${n} text`);
+        if (!(c.imageUrl && c.imageUrl.trim() && c.width && !c.error)) missing.push(`clue ${n} image`);
+        if (!(c.credit && c.credit.trim())) missing.push(`clue ${n} credit`);
+      });
+      if (!(reveal.imageUrl && reveal.imageUrl.trim() && reveal.width && !reveal.error)) missing.push('reveal image');
+      const revealCredit = editorEls.revealCredit ? editorEls.revealCredit.value.trim() : '';
+      if (!revealCredit) missing.push('reveal credit');
+
+      const ready = missing.length === 0;
+      const missingTitle = `Missing: ${missing.join(', ')}`;
+      if (editorEls.previewBtn) {
+        editorEls.previewBtn.disabled = !ready;
+        editorEls.previewBtn.title = ready ? 'Save, then mark ready for preview' : missingTitle;
+      }
+      if (editorEls.publishBtn) {
+        editorEls.publishBtn.disabled = !ready;
+        editorEls.publishBtn.title = ready ? 'Save, then publish to everyone' : missingTitle;
+      }
+    }
+
+    // ── Reorder (drag + keyboard), moving the whole object so text/image/credit
+    // travel together and can never desync. ──────────────────────────────────────
+    function moveClue(from, to) {
+      if (to < 0 || to > 2 || from === to) return;
+      const [moved] = clues.splice(from, 1);
+      clues.splice(to, 0, moved);
+      isDirty = true;
+      renderClueRows();
+      recomputeWarnings();
+      applyAspectRatios();
+      evaluateReadiness();
+    }
+
+    function clearDragMarkers() {
+      cluesContainer.querySelectorAll('.is-dragging, .is-drop-target')
+        .forEach((el) => el.classList.remove('is-dragging', 'is-drop-target'));
+    }
+
+    function wireClueContainer() {
+      // Keep the array in sync on every keystroke (source of truth), but do NOT
+      // re-render on input — that would destroy the caret. Validation (blur/paste)
+      // repaints only the thumbnail/messages.
+      cluesContainer.addEventListener('input', (e) => {
+        const card = e.target.closest('[data-clue-index]');
+        if (!card) return;
+        const i = +card.dataset.clueIndex;
+        const f = e.target.dataset.field;
+        if (f === 'text') clues[i].clueText = e.target.value;
+        else if (f === 'credit') clues[i].credit = e.target.value;
+        else if (f === 'url') {
+          const c = clues[i];
+          c.imageUrl = e.target.value;
+          // A changed URL is unvalidated until blur/paste — clear prior result so
+          // gating can't treat a stale pass as current.
+          c.width = null; c.height = null; c.error = null; c.warning = null;
+        }
+        evaluateReadiness();
+      });
+
+      cluesContainer.addEventListener('focusout', (e) => {
+        if (e.target.dataset && e.target.dataset.field === 'url') {
+          const card = e.target.closest('[data-clue-index]');
+          if (card) validateClue(+card.dataset.clueIndex);
+        }
+      });
+
+      cluesContainer.addEventListener('paste', (e) => {
+        if (!(e.target.dataset && e.target.dataset.field === 'url')) return;
+        const card = e.target.closest('[data-clue-index]');
+        if (!card) return;
+        const i = +card.dataset.clueIndex;
+        // Let the pasted text land in the input first, then read + validate.
+        setTimeout(() => { clues[i].imageUrl = e.target.value; validateClue(i); }, 0);
+      });
+
+      // Keyboard-accessible reorder.
+      cluesContainer.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-move]');
+        if (!btn) return;
+        const card = e.target.closest('[data-clue-index]');
+        const i = +card.dataset.clueIndex;
+        const to = btn.dataset.move === 'up' ? i - 1 : i + 1;
+        moveClue(i, to);
+        // Keep focus on the same control on its new card for a fluent flow.
+        const moved = cluesContainer.querySelector(`[data-clue-index="${to}"] [data-move="${btn.dataset.move}"]`);
+        (moved && !moved.disabled ? moved : cluesContainer.querySelector(`[data-clue-index="${to}"] .gw-clue-handle`))?.focus?.();
+      });
+
+      // Native HTML5 drag on the handle only.
+      cluesContainer.addEventListener('dragstart', (e) => {
+        const handle = e.target.closest('[data-drag-handle]');
+        const card = e.target.closest('[data-clue-index]');
+        if (!handle || !card) { e.preventDefault(); return; }
+        dragIndex = +card.dataset.clueIndex;
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', String(dragIndex)); } catch { /* IE guard */ }
+        card.classList.add('is-dragging');
+      });
+
+      cluesContainer.addEventListener('dragover', (e) => {
+        if (dragIndex === null) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const card = e.target.closest('[data-clue-index]');
+        cluesContainer.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+        if (card && +card.dataset.clueIndex !== dragIndex) card.classList.add('is-drop-target');
+      });
+
+      cluesContainer.addEventListener('drop', (e) => {
+        if (dragIndex === null) return;
+        e.preventDefault();
+        const card = e.target.closest('[data-clue-index]');
+        if (card) moveClue(dragIndex, +card.dataset.clueIndex);
+        clearDragMarkers();
+        dragIndex = null;
+      });
+
+      cluesContainer.addEventListener('dragend', () => { clearDragMarkers(); dragIndex = null; });
+    }
+
+    async function renderEditorView(root, gameId) {
+      root.innerHTML = `<div class="app-view"><p class="gw-hint">Loading…</p></div>`;
+
+      const isCreate = gameId == null;
+      let g;
+      try {
+        if (isCreate) {
+          // Fresh game: pre-fill the next free number (editable) and start empty.
+          g = {
+            id: null, slug: null, game_number: await nextGameNumber(),
+            answer: '', accepted_answers: [], gender: null,
+            reveal_image_url: '', reveal_credit: '', read_more_url: '', significance: '',
+            status: 'draft', notes: '', clues: [],
+          };
+        } else {
+          g = await getGame(gameId);
+        }
+      } catch (err) {
+        root.innerHTML = `<div class="app-view"><p class="view-error">Could not load game: ${esc(err.message)}</p>
+          <p><button class="btn-ghost btn-sm" id="gw-back"><i class="fa-solid fa-arrow-left"></i> Back to games</button></p></div>`;
+        root.querySelector('#gw-back')?.addEventListener('click', () => renderGamesList(root));
+        return;
+      }
+
+      // Reset the editor session for this render.
+      currentGameId = g.id;
+      currentGameStatus = g.status;
+      acceptedAnswers = Array.isArray(g.accepted_answers) ? g.accepted_answers.slice() : [];
+
+      // Seed the single source of truth. Array index = position (clue 1 = index 0).
+      clues = [0, 1, 2].map((i) => {
+        const c = g.clues[i];
+        return {
+          clueText: c?.clue_text || '', imageUrl: c?.image_url || '', credit: c?.credit || '',
+          width: null, height: null, error: null, warning: null, loading: false,
+        };
+      });
+      reveal = { imageUrl: g.reveal_image_url || '', width: null, height: null, error: null, warning: null, loading: false };
+
+      const genderVal = g.gender || '';
+
+      root.innerHTML = `
+        <section class="app-view" id="gw-editor">
+          <div class="gw-editor-head">
+            <button class="btn-ghost btn-sm" data-back><i class="fa-solid fa-arrow-left"></i> Back</button>
+            <span class="gw-editor-title">${isCreate ? 'New game' : `Game ${esc(String(g.game_number))} — ${esc(g.answer || 'Untitled')}`}</span>
+            <span class="view-row-state is-${esc(g.status)}">${esc(g.status)}</span>
+            <div class="gw-editor-actions">
+              <button class="btn-ghost btn-sm" data-save>Save draft</button>
+              <button class="btn-ghost btn-sm" data-preview disabled>Ready to preview</button>
+              <button class="btn-primary btn-sm" data-publish disabled>Publish</button>
+            </div>
+          </div>
+          <p class="admin-msg" data-msg hidden></p>
+
+          <!-- 1. The answer -->
+          <div class="gw-section">
+            <h3>The answer</h3>
+            <div class="gw-row">
+              <div class="gw-field">
+                <label class="gw-label" for="gw-number">Game number</label>
+                <input class="gw-input" id="gw-number" type="number" min="1" value="${esc(String(g.game_number ?? ''))}"${isCreate ? '' : ' readonly'}>
+                ${isCreate ? `<span class="gw-help">Used for internal reference and sort order. Not shown to players.</span>` : ''}
+              </div>
+              <div class="gw-field">
+                <label class="gw-label" for="gw-answer">Answer</label>
+                <input class="gw-input" id="gw-answer" type="text" value="${esc(g.answer || '')}" placeholder="e.g. Albert Einstein" required>
+              </div>
+            </div>
+            <div class="gw-field">
+              <span class="gw-label">Accepted answers</span>
+              ${acceptedTagsHtml()}
+              <span class="gw-help">The game already accepts the surname alone and accent-free spellings. Add nicknames and alternate spellings only.</span>
+            </div>
+            <div class="gw-field">
+              <label class="gw-label" for="gw-gender">Gender</label>
+              <select class="gw-select" id="gw-gender">
+                <option value=""${genderVal === '' ? ' selected' : ''}>Unset</option>
+                <option value="male"${genderVal === 'male' ? ' selected' : ''}>Male</option>
+                <option value="female"${genderVal === 'female' ? ' selected' : ''}>Female</option>
+              </select>
+              <span class="gw-help">Used for the Read more wording. Optional.</span>
+            </div>
+          </div>
+
+          <!-- 2. Clues -->
+          <div class="gw-section">
+            <h3>Clues</h3>
+            <p class="gw-help" style="margin: -6px 0 12px;">Drag the handle, or use the arrows, to reorder. The clue text and its image move together.</p>
+            <div id="gw-clue-cards" class="gw-clue-cards"></div>
+          </div>
+
+          <!-- Populated in a later step. Intentionally empty. -->
+          <div id="gw-sequence-preview"></div>
+
+          <!-- 3. The reveal -->
+          <div class="gw-section">
+            <h3>The reveal</h3>
+            <div class="gw-thumb-row">
+              <div class="gw-field">
+                <label class="gw-label" for="gw-reveal-image">Reveal image URL</label>
+                <input class="gw-input" id="gw-reveal-image" type="text" value="${esc(g.reveal_image_url || '')}" placeholder="https://i.dailymail.co.uk/…">
+                <p class="gw-field-error" data-reveal-error hidden></p>
+                <p class="gw-field-warning" data-reveal-warning hidden></p>
+              </div>
+              <div class="gw-thumb" data-reveal-thumb>${g.reveal_image_url ? `<img src="${esc(g.reveal_image_url)}" alt="" referrerpolicy="no-referrer">` : ''}</div>
+            </div>
+            <div class="gw-field">
+              <label class="gw-label" for="gw-reveal-credit">Reveal credit</label>
+              <input class="gw-input" id="gw-reveal-credit" type="text" value="${esc(g.reveal_credit || '')}" placeholder="e.g. Photo: NASA">
+            </div>
+            <div class="gw-field">
+              <label class="gw-label" for="gw-read-more">Read more URL</label>
+              <input class="gw-input" id="gw-read-more" type="text" value="${esc(g.read_more_url || '')}" placeholder="https://…">
+            </div>
+            <div class="gw-field">
+              <label class="gw-label" for="gw-significance">Significance</label>
+              <textarea class="gw-textarea" id="gw-significance" placeholder="A fun fact about this person…">${esc(g.significance || '')}</textarea>
+              <span class="gw-help">Fun fact shown on the result screen. Optional.</span>
+            </div>
+          </div>
+
+          <!-- 4. Status -->
+          <div class="gw-section">
+            <h3>Status</h3>
+            <div class="gw-field">
+              <span class="gw-label">Current status</span>
+              <div><span class="view-row-state is-${esc(g.status)}">${esc(g.status)}</span></div>
+              <span class="gw-help">Draft is not reachable by players; review is reachable only by its link; live is served to everyone.</span>
+            </div>
+            <div class="gw-field" id="gw-link-field"${isCreate ? ' hidden' : ''}>
+              <label class="gw-label" for="gw-link">Game link</label>
+              <div class="gw-link-row">
+                <input class="gw-input" id="gw-link" type="text" value="${isCreate ? '' : esc(GAME_URL(g.slug))}" readonly>
+                <button class="btn-ghost btn-sm" data-copy="${isCreate ? '' : esc(g.slug)}"><i class="fa-solid fa-link"></i> Copy link</button>
+              </div>
+              <span class="gw-help">This link never changes and is safe to share for review.</span>
+            </div>
+            <div class="gw-field">
+              <label class="gw-label" for="gw-notes">Notes</label>
+              <textarea class="gw-textarea" id="gw-notes" placeholder="Internal notes…">${esc(g.notes || '')}</textarea>
+              <span class="gw-help">Internal only. Never shown to players.</span>
+            </div>
+          </div>
+        </section>`;
+
+      // Cache refs (fresh each render — the section is rebuilt, so no listener
+      // accumulates on the persistent mount).
+      const view = root.querySelector('#gw-editor');
+      cluesContainer = view.querySelector('#gw-clue-cards');
+      editorEls = {
+        saveBtn: view.querySelector('[data-save]'),
+        previewBtn: view.querySelector('[data-preview]'),
+        publishBtn: view.querySelector('[data-publish]'),
+        msgEl: view.querySelector('[data-msg]'),
+        acceptedBox: view.querySelector('[data-accepted]'),
+        revealCredit: view.querySelector('#gw-reveal-credit'),
+        revealThumb: view.querySelector('[data-reveal-thumb]'),
+        revealError: view.querySelector('[data-reveal-error]'),
+        revealWarn: view.querySelector('[data-reveal-warning]'),
+      };
+
+      // ── Save payload assembly ──────────────────────────────────────────────
+      // Plain form fields are read from the DOM here (they have no separate
+      // state); clues and accepted answers come from their arrays, never the DOM.
+      // Optional text fields normalise ''→null; gender is constrained to the
+      // allowed enum or null.
+      function collectFields() {
+        const v = (sel) => view.querySelector(sel).value;
+        const norm = (s) => { const t = (s || '').trim(); return t === '' ? null : t; };
+        const genderRaw = v('#gw-gender');
+        return {
+          answer: (v('#gw-answer') || '').trim(),
+          accepted_answers: acceptedAnswers.slice(),
+          gender: genderRaw === 'male' || genderRaw === 'female' ? genderRaw : null,
+          reveal_image_url: norm(v('#gw-reveal-image')),
+          reveal_credit: norm(v('#gw-reveal-credit')),
+          read_more_url: norm(v('#gw-read-more')),
+          significance: norm(v('#gw-significance')),
+          notes: norm(v('#gw-notes')),
+        };
+      }
+      // Three clue rows, index → position. Written as-is (drafts may be partial).
+      function collectClues() {
+        return clues.map((c) => ({
+          clue_text: c.clueText || '', image_url: c.imageUrl || '', credit: c.credit || '',
+        }));
+      }
+
+      // Persist the game. In create mode: insert the row (stamping created_by and
+      // game_number), then upsert its clues; returns the new id. In edit mode:
+      // update the row + clues in place. A duplicate game_number bubbles up as a
+      // 23505 for the caller to translate. Never sets slug/created_at.
+      async function persist() {
+        const fields = collectFields();
+        const clueRows = collectClues();
+        if (currentGameId == null) {
+          const num = parseInt(view.querySelector('#gw-number').value, 10);
+          const row = await createGame({ ...fields, game_number: num, status: 'draft' });
+          await saveGame(row.id, fields, clueRows);
+          return row.id;
+        }
+        await saveGame(currentGameId, fields, clueRows);
+        return currentGameId;
+      }
+
+      // Save draft — always available, never gated by validation, so partial work
+      // is never lost. On create it re-renders into edit mode (id + slug now exist).
+      async function handleSave() {
+        clearMsg();
+        const btn = editorEls.saveBtn;
+        const wasCreate = currentGameId == null;
+        btn.disabled = true; btn.textContent = 'Saving…';
+        try {
+          const id = await persist();
+          isDirty = false;
+          if (wasCreate) {
+            await renderEditorView(root, id);
+            showMsg('Game created and saved.', 'ok');
+          } else {
+            showMsg('Saved.', 'ok');
+            btn.disabled = false; btn.textContent = 'Save draft';
+          }
+        } catch (err) {
+          if (err && err.code === '23505') {
+            const num = parseInt(view.querySelector('#gw-number').value, 10);
+            showMsg(`Game number ${num} is already taken. Try ${num + 1}.`, 'error');
+          } else {
+            showMsg('Could not save: ' + (err.message || err), 'error');
+          }
+          btn.disabled = false; btn.textContent = 'Save draft';
+        }
+      }
+
+      // Save, then move the game to a new status. Publishing (live) is one-way and
+      // guarded by a confirm() — there is no control to revert from live.
+      async function handleStatusChange(newStatus, btn) {
+        clearMsg();
+        if (newStatus === 'live') {
+          const name = (view.querySelector('#gw-answer').value || 'this game').trim() || 'this game';
+          if (!confirm(`Publish “${name}” to everyone? The game link becomes permanent and public — this can’t be undone.`)) return;
+        }
+        const label = btn.textContent;
+        [editorEls.saveBtn, editorEls.previewBtn, editorEls.publishBtn].forEach((b) => { b.disabled = true; });
+        btn.textContent = 'Saving…';
+        try {
+          const id = await persist();
+          await setGameStatus(id, newStatus);
+          isDirty = false;
+          await renderEditorView(root, id);
+          showMsg(newStatus === 'live' ? 'Published — the game is now live.' : 'Saved and marked ready for preview.', 'ok');
+        } catch (err) {
+          if (err && err.code === '23505') {
+            const num = parseInt(view.querySelector('#gw-number').value, 10);
+            showMsg(`Game number ${num} is already taken. Try ${num + 1}.`, 'error');
+          } else {
+            showMsg('Could not save: ' + (err.message || err), 'error');
+          }
+          btn.textContent = label;
+          editorEls.saveBtn.disabled = false;
+          evaluateReadiness();
+        }
+      }
+
+      editorEls.saveBtn.addEventListener('click', handleSave);
+      editorEls.previewBtn.addEventListener('click', (e) => handleStatusChange('review', e.currentTarget));
+      editorEls.publishBtn.addEventListener('click', (e) => handleStatusChange('live', e.currentTarget));
+
+      // Any edit to a form field marks the editor dirty (programmatic value
+      // changes don't fire input/change, so validation repaints stay clean).
+      view.addEventListener('input', () => { isDirty = true; });
+      view.addEventListener('change', () => { isDirty = true; });
+
+      // Accepted-answer tag input: Enter/comma commits, × removes, Backspace on an
+      // empty field removes the last chip. Values live in acceptedAnswers only.
+      editorEls.acceptedBox.addEventListener('keydown', (e) => {
+        const input = e.target.closest('#gw-accepted-input');
+        if (!input) return;
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          commitAccepted(input.value);
+          input.value = '';
+          paintAccepted();
+        } else if (e.key === 'Backspace' && input.value === '' && acceptedAnswers.length) {
+          e.preventDefault();
+          acceptedAnswers.pop();
+          isDirty = true;
+          paintAccepted();
+        }
+      });
+      editorEls.acceptedBox.addEventListener('click', (e) => {
+        const rm = e.target.closest('[data-remove-accepted]');
+        if (!rm) return;
+        acceptedAnswers.splice(+rm.dataset.removeAccepted, 1);
+        isDirty = true;
+        paintAccepted();
+      });
+
+      // Nav / copy — delegated on the section (fresh element, so no stacking).
+      view.addEventListener('click', (e) => {
+        if (e.target.closest('[data-back]')) {
+          if (isDirty && !confirm('You have unsaved changes. Leave without saving?')) return;
+          renderGamesList(root); return;
+        }
+        const copyBtn = e.target.closest('[data-copy]');
+        if (copyBtn) copyLink(copyBtn);
+      });
+
+      // Reveal image reuses the shared validator; reveal credit affects readiness.
+      const revealUrl = view.querySelector('#gw-reveal-image');
+      revealUrl.addEventListener('focusout', () => { reveal.imageUrl = revealUrl.value; validateReveal(); });
+      revealUrl.addEventListener('paste', () => { setTimeout(() => { reveal.imageUrl = revealUrl.value; validateReveal(); }, 0); });
+      editorEls.revealCredit.addEventListener('input', evaluateReadiness);
+
+      // Build the clue rows, wire their interactions, then validate what loaded
+      // from the database so thumbnails and the readiness gate reflect reality.
+      renderClueRows();
+      wireClueContainer();
+      evaluateReadiness();
+      clues.forEach((c, i) => { if (c.imageUrl && c.imageUrl.trim()) validateClue(i); });
+      if (reveal.imageUrl && reveal.imageUrl.trim()) validateReveal();
+
+      // A freshly loaded (or freshly saved) editor has no unsaved changes yet.
+      isDirty = false;
     }
   </script>
 </body>

@@ -11,6 +11,8 @@
   --bg: #f6f7f9; --card: #ffffff; --fg: #1a1a1e; --muted: #6b7280;
   --border: #e5e7eb; --primary: #4f46e5; --primary-fg: #ffffff;
   --error: #dc2626; --radius: 10px;
+  /* Non-blocking warning — an amber sitting between --muted and --error. */
+  --warning: #b45309;
 }
 * { box-sizing: border-box; }
 body {
@@ -87,3 +89,175 @@ body {
 .view-row-state.is-draft  { background: #f3f4f6; color: var(--muted); }   /* grey  */
 .view-row-state.is-review { background: #fef3c7; color: #92400e; }        /* amber */
 .view-row-state.is-live   { background: #dcfce7; color: #15803d; }        /* green */
+
+/* ============================================================================
+   EDITOR — form field pattern (NEW; there is no shared form helper in this
+   codebase). Defined once here and reused across the editor. Follows the
+   platform.html .auth-label / .auth-input conventions: labels 13px weight 500,
+   inputs 14px, radius 8px, --border.
+   ============================================================================ */
+
+/* Section card grouping related fields */
+.gw-section {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 18px; margin-bottom: 18px;
+}
+.gw-section > h3 { margin: 0 0 14px; font-size: 15px; font-weight: 600; }
+
+/* Field wrapper — label stacked above its control */
+.gw-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.gw-field:last-child { margin-bottom: 0; }
+.gw-label { font-size: 13px; font-weight: 500; }
+
+/* Horizontal group for fields sitting side by side */
+.gw-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.gw-row > .gw-field { flex: 1 1 200px; }
+
+/* Controls */
+.gw-input, .gw-textarea, .gw-select {
+  font: inherit; font-size: 14px; color: var(--fg); background: var(--card);
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  width: 100%;
+}
+.gw-input:focus, .gw-textarea:focus, .gw-select:focus {
+  outline: 2px solid var(--primary); outline-offset: 0; border-color: transparent;
+}
+.gw-input:read-only { background: #f6f7f9; color: var(--muted); cursor: default; }
+.gw-textarea { min-height: 80px; resize: vertical; }
+
+/* Help + error text below a control */
+.gw-help { font-size: 12.5px; color: var(--muted); }
+.gw-field-error { font-size: 12.5px; color: var(--error); }
+.gw-field-error[hidden] { display: none; }
+
+/* Read-only accepted-answer chips */
+.gw-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.gw-chip {
+  font-size: 12px; background: #eef2ff; color: var(--primary);
+  padding: 3px 10px; border-radius: 999px;
+}
+.gw-chips-empty { font-size: 12.5px; color: var(--muted); }
+
+/* Editable accepted-answer tag input */
+.gw-tags {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 6px; background: var(--card);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.gw-tags:focus-within { border-color: var(--primary); }
+.gw-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; background: #eef2ff; color: var(--primary);
+  padding: 3px 4px 3px 10px; border-radius: 999px;
+}
+.gw-tag-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; border: 0; cursor: pointer;
+  background: transparent; color: var(--primary); border-radius: 999px;
+  font-size: 11px; line-height: 1;
+}
+.gw-tag-x:hover { background: rgba(79, 70, 229, 0.15); }
+.gw-tag-input {
+  flex: 1; min-width: 120px; border: 0; outline: none; background: transparent;
+  font: inherit; font-size: 13px; color: var(--fg); padding: 3px 4px;
+}
+
+/* Editor header (mirrors platform.html .review-nav) */
+.gw-editor-head {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 18px;
+  padding-bottom: 14px; border-bottom: 1px solid var(--border);
+}
+.gw-editor-title { font-size: 17px; font-weight: 700; min-width: 0; }
+.gw-editor-head .view-row-state { position: static; }
+.gw-editor-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+
+/* Clue blocks (read-only) */
+.gw-clue {
+  display: flex; gap: 12px; align-items: flex-start;
+  border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px;
+}
+.gw-clue:last-child { margin-bottom: 0; }
+.gw-clue-thumb {
+  flex: 0 0 auto; width: 72px; height: 72px; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--border); background: #f3f4f6;
+}
+.gw-clue-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.gw-clue-n { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.gw-clue-text { font-size: 14px; }
+.gw-clue-credit { font-size: 12.5px; color: var(--muted); }
+.gw-clue.is-empty { align-items: center; justify-content: center; color: var(--muted); font-size: 13px; min-height: 72px; }
+
+/* Reveal-image thumbnail sitting beside its URL input */
+.gw-thumb-row { display: flex; gap: 12px; align-items: flex-start; }
+.gw-thumb-row > .gw-field { flex: 1; }
+.gw-thumb {
+  flex: 0 0 auto; width: 72px; height: 72px; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--border); background: #f3f4f6;
+}
+
+/* Copy-link row (input + button) */
+.gw-link-row { display: flex; gap: 8px; align-items: center; }
+.gw-link-row > .gw-input { flex: 1; }
+
+/* ============================================================================
+   EDITABLE CLUE CARDS (interactive) — the clue text and its image are ONE unit,
+   so reordering moves them together and the UI makes that obvious. Tokens as
+   already declared: 8px radius, --border, the shared card shadow.
+   ============================================================================ */
+.gw-field-warning { font-size: 12.5px; color: var(--warning); }
+.gw-field-warning[hidden] { display: none; }
+
+.gw-clue-cards { display: flex; flex-direction: column; gap: 12px; }
+
+.gw-clue-card {
+  display: flex; flex-direction: column; gap: 12px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06); padding: 14px;
+}
+.gw-clue-card.is-dragging { opacity: .5; }
+/* Clear drop indicator: a solid inset ring in the primary colour. */
+.gw-clue-card.is-drop-target { border-color: var(--primary); box-shadow: inset 0 0 0 2px var(--primary); }
+
+/* Header strip: handle, label, spacer, up/down buttons */
+.gw-clue-card-head { display: flex; align-items: center; gap: 10px; }
+.gw-clue-handle {
+  cursor: grab; color: var(--muted); background: transparent; border: 0;
+  padding: 2px 4px; font-size: 15px; line-height: 1;
+}
+.gw-clue-handle:active { cursor: grabbing; }
+.gw-clue-heading { font-size: 13px; font-weight: 600; }
+.gw-clue-head-spacer { flex: 1; }
+.gw-move-btn {
+  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--card); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 6px; font-size: 12px; cursor: pointer;
+}
+.gw-move-btn:hover:not(:disabled) { background: #f0f1f3; }
+.gw-move-btn:disabled { opacity: .4; cursor: default; }
+.gw-move-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* URL input + its framed thumbnail, side by side */
+.gw-clue-url-row { display: flex; gap: 12px; align-items: flex-start; }
+.gw-clue-url-row > .gw-field { flex: 1; }
+
+/* Thumbnail framed at the game's aspect ratio (set inline). object-fit: cover
+   shows the exact framing players will see. Shared by clue cards. */
+.gw-img-thumb {
+  position: relative; flex: 0 0 auto; width: 110px; overflow: hidden;
+  border-radius: 6px; border: 1px solid var(--border); background: #f3f4f6;
+  display: grid; place-items: center;
+}
+.gw-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gw-img-thumb.is-loading { background: #eef0f3; }
+
+/* Reveal thumbnail also holds an <img> now (was a bare img before). */
+.gw-thumb { position: relative; overflow: hidden; display: grid; place-items: center; }
+.gw-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Subtle loading overlay on a thumbnail while an image is being fetched. */
+.gw-thumb-spinner {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--muted); background: rgba(255,255,255,.6); font-size: 14px;
+}
+
+
