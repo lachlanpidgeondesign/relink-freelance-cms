@@ -442,16 +442,20 @@ export async function inviteUser(email, role) {
   return data; // { ok, email }
 }
 
-// Create a new user with a temporary password. Admin-only. The temp password is
-// returned so the admin can relay it via a second channel (Teams/Slack). The user
-// is forced to change their password on first sign-in.
+// Invite a new user by email with an initial role. Admin-only. The account is
+// pre-created server-side (with the chosen role) and a 6-digit sign-in CODE is
+// emailed to them — no clickable link, so corporate mail scanners (Outlook Safe
+// Links) can't consume it. The invitee signs in with the code, then sets their
+// full name and a password. `redirectTo` is only used for the plain link in the
+// email template; it must be on the project's Auth "Redirect URLs" allowlist.
 export async function createUser(email, role) {
+  const redirectTo = `${window.location.origin}${window.location.pathname}`;
   const { data, error } = await supabase.functions.invoke('admin-create-user', {
-    body: { email, role },
+    body: { email, role, redirectTo },
   });
   if (error) throw await unwrapFunctionError(error);
   if (data?.error) throw new Error(data.error);
-  return data; // { ok, email, tempPassword }
+  return data; // { ok, email }
 }
 
 // Change a user's role. The `profiles_admin_write` RLS policy is the real gate

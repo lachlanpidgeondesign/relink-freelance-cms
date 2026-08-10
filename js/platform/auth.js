@@ -40,6 +40,32 @@ export async function sendPasswordReset(email, redirectTo) {
   if (error) throw error;
 }
 
+// ── Email code (OTP) sign-in ────────────────────────────────────────────────
+// Onboarding and password-less recovery without any clickable link. Supabase
+// emails a 6-digit code ({{ .Token }} in the email template); the user types it
+// in. `shouldCreateUser: false` keeps access invite-only — a code is only sent
+// to an email an admin has already created. A fresh code can be requested any
+// time (the previous one is invalidated), which is the fix for an expired code.
+export async function sendSignInCode(email) {
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: false,
+      emailRedirectTo: `${window.location.origin}${window.location.pathname}`,
+    },
+  });
+  if (error) throw error;
+}
+
+// Verify a 6-digit email code. On success a session is established and
+// onAuthChange (main.js) routes the user onward (into onboarding for a new user).
+export async function verifySignInCode(email, token) {
+  const { data, error } = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+  if (error) throw error;
+  return data;
+}
+
+
 export async function getSession() {
   const { data: { session } } = await supabase.auth.getSession();
   return session;
@@ -76,6 +102,7 @@ export function renderAuthView(mount) {
             <button type="submit" id="auth-signin" class="auth-btn auth-btn-primary">Sign in</button>
           </div>
           <button type="button" id="auth-forgot" class="auth-link">Forgot your password?</button>
+          <button type="button" id="auth-usecode" class="auth-link">First time here, or no password? Sign in with a code</button>
           <p id="auth-message" class="auth-message" role="status" aria-live="polite"></p>
         </form>
       </div>
@@ -87,6 +114,7 @@ export function renderAuthView(mount) {
   const messageEl = mount.querySelector('#auth-message');
   const signInBtn = mount.querySelector('#auth-signin');
   const forgotBtn = mount.querySelector('#auth-forgot');
+  const useCodeBtn = mount.querySelector('#auth-usecode');
 
   function setBusy(busy, verb) {
     signInBtn.disabled = busy;
@@ -137,18 +165,124 @@ export function renderAuthView(mount) {
       setBusy(false);
     }
   });
+
+  // First-time / password-less: switch to the email-code screen, carrying over
+  // whatever email was already typed.
+  useCodeBtn.addEventListener('click', () => {
+    renderCodeSignInView(mount, { email: emailEl.value.trim() });
+  });
 }
+
+// ── View: sign in with an email code ─────────────────────────────────────────
+// Passwordless entry for onboarding (and anyone without a usable password). The
+// user enters their email, receives a 6-digit code by email, and types it in. No
+// clickable link is involved, so corporate mail scanners can't break the flow.
+// On success, onAuthChange (main.js) routes them onward — a brand-new user into
+// onboarding (set full name + password). `email` pre-fills from the sign-in view.
+export function renderCodeSignInView(mount, { email = '' } = {}) {
+  mount.innerHTML = `
+    <div class="auth-screen">
+      <div class="auth-card">
+        <h1 class="auth-title">Sign in with a code</h1>
+        <p class="auth-subtitle">Enter your email, then the 6-digit code we email you. Been invited? Your code is in the invitation email.</p>
+        <form id="code-form" class="auth-form" autocomplete="off">
+          <label class="auth-label" for="code-email">Email</label>
+          <input id="code-email" class="auth-input" type="email" name="email"
+                 autocomplete="email" required placeholder="you@example.com" value="${email}">
+
+          <label class="auth-label" for="code-token">6-digit code</label>
+          <input id="code-token" class="auth-input" type="text" name="one-time-code"
+                 inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*"
+                 maxlength="6" placeholder="123456">
+
+          <div class="auth-actions">
+            <button type="submit" id="code-verify" class="auth-btn auth-btn-primary">Verify &amp; continue</button>
+          </div>
+          <button type="button" id="code-send" class="auth-link">Email me a code / send a new one</button>
+          <button type="button" id="code-back" class="auth-link">Use a password instead</button>
+          <p id="code-message" class="auth-message" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </div>`;
+
+  const form = mount.querySelector('#code-form');
+  const emailEl = mount.querySelector('#code-email');
+  const tokenEl = mount.querySelector('#code-token');
+  const verifyBtn = mount.querySelector('#code-verify');
+  const sendBtn = mount.querySelector('#code-send');
+  const backBtn = mount.querySelector('#code-back');
+  const messageEl = mount.querySelector('#code-message');
+
+  function setMessage(text, kind = 'info') {
+    messageEl.textContent = text;
+    messageEl.className = `auth-message auth-message-${kind}`;
+  }
+
+  // Send / resend a code.
+  sendBtn.addEventListener('click', async () => {
+    const addr = emailEl.value.trim();
+    if (!addr) { setMessage('Enter your email above first.', 'error'); return; }
+    sendBtn.disabled = true;
+    verifyBtn.disabled = true;
+    setMessage('Sending a code…', 'info');
+    try {
+      await sendSignInCode(addr);
+      setMessage(`A 6-digit code is on its way to ${addr}. It expires after a while — request a new one if it stops working.`, 'info');
+      tokenEl.focus();
+    } catch (err) {
+      // Invite-only: an unknown email is refused. Keep the message generic so we
+      // don't reveal which addresses have accounts.
+      setMessage(err?.message || 'Could not send a code. Check the email address, or ask an admin for an invite.', 'error');
+    } finally {
+      sendBtn.disabled = false;
+      verifyBtn.disabled = false;
+    }
+  });
+
+  // Verify the entered code.
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const addr = emailEl.value.trim();
+    const token = tokenEl.value.trim();
+    if (!addr) { setMessage('Enter your email.', 'error'); return; }
+    if (!/^\d{6}$/.test(token)) { setMessage('Enter the 6-digit code from your email.', 'error'); return; }
+    verifyBtn.disabled = true;
+    sendBtn.disabled = true;
+    setMessage('Checking your code…', 'info');
+    try {
+      await verifySignInCode(addr, token);
+      setMessage('Success — taking you in…', 'info');
+      // onAuthChange in main.js takes over from here (routes to onboarding).
+    } catch (err) {
+      verifyBtn.disabled = false;
+      sendBtn.disabled = false;
+      setMessage(
+        (err?.message && /expired|invalid/i.test(err.message))
+          ? 'That code has expired or is incorrect. Tap “Email me a code / send a new one” for a fresh code.'
+          : (err?.message || 'Could not verify that code. Please try again.'),
+        'error',
+      );
+    }
+  });
+
+  backBtn.addEventListener('click', () => renderAuthView(mount));
+}
+
 
 // ── View: set / reset password ───────────────────────────────────────────────
 // Shown when the user arrives via an INVITE or a password-RECOVERY link. In both
 // cases they land already signed in (the link carried a session) but need to set
 // a password before using the app. main.js detects the link type and renders
 // this; on success it calls `onDone`, which routes the now-ready user onward.
-export function renderSetPasswordView(mount, { mode = 'invite', email, onDone } = {}) {
+//
+// During onboarding a new user has no profile name yet, so `needsName: true`
+// adds a required "Full name" field. The name is written to the user's own
+// auth metadata (`display_name`), which a DB trigger mirrors into profiles.
+export function renderSetPasswordView(mount, { mode = 'invite', email, needsName = false, onDone } = {}) {
   const titles = {
-    invite: ['Welcome to Relink', 'Set a password to finish setting up your account.'],
+    invite: ['Welcome to Relink', 'Just a couple of details to finish setting up your account.'],
     recovery: ['Reset your password', 'Choose a new password for your account.'],
-    first_login: ['Set your password', 'Please set a new password to continue. Your temporary password cannot be used after this.'],
+    first_login: ['Welcome to Relink', 'Set your name and a password to finish setting up your account.'],
   };
   const [title, subtitle] = titles[mode] || titles.invite;
 
@@ -159,6 +293,10 @@ export function renderSetPasswordView(mount, { mode = 'invite', email, onDone } 
         <p class="auth-subtitle">${subtitle}</p>
         <form id="pw-form" class="auth-form" autocomplete="on">
           ${email ? `<p class="auth-account">Signing in as <strong>${email}</strong></p>` : ''}
+          ${needsName ? `
+          <label class="auth-label" for="pw-name">Full name</label>
+          <input id="pw-name" class="auth-input" type="text" name="name"
+                 autocomplete="name" required placeholder="Jane Doe" maxlength="120">` : ''}
           <label class="auth-label" for="pw-new">New password</label>
           <input id="pw-new" class="auth-input" type="password" name="new-password"
                  autocomplete="new-password" required placeholder="••••••••" minlength="10">
@@ -169,7 +307,7 @@ export function renderSetPasswordView(mount, { mode = 'invite', email, onDone } 
 
           <div class="auth-actions">
             <button type="submit" id="pw-submit" class="auth-btn auth-btn-primary">
-              ${mode === 'invite' || mode === 'first_login' ? 'Set password & continue' : 'Update password'}
+              ${mode === 'invite' || mode === 'first_login' ? 'Save & continue' : 'Update password'}
             </button>
           </div>
           <p id="pw-message" class="auth-message" role="status" aria-live="polite"></p>
@@ -178,6 +316,7 @@ export function renderSetPasswordView(mount, { mode = 'invite', email, onDone } 
     </div>`;
 
   const form = mount.querySelector('#pw-form');
+  const nameEl = mount.querySelector('#pw-name');
   const newEl = mount.querySelector('#pw-new');
   const confirmEl = mount.querySelector('#pw-confirm');
   const submitBtn = mount.querySelector('#pw-submit');
@@ -190,22 +329,27 @@ export function renderSetPasswordView(mount, { mode = 'invite', email, onDone } 
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const fullName = needsName ? (nameEl.value.trim()) : null;
     const pw = newEl.value;
     const confirm = confirmEl.value;
+    if (needsName && !fullName) { setMessage('Please enter your full name.', 'error'); return; }
     if (pw.length < 10) { setMessage('Password must be at least 10 characters.', 'error'); return; }
     if (pw !== confirm) { setMessage('Those passwords don\u2019t match.', 'error'); return; }
 
     submitBtn.disabled = true;
     setMessage('Saving…', 'info');
     try {
-      await updatePassword(pw);
-      // Clear the must_change_password flag so subsequent logins go straight in.
-      await supabase.auth.updateUser({ data: { must_change_password: false } });
-      setMessage('Password set. Taking you in…', 'info');
+      // One update: set the password, clear the must-change flag, and (if
+      // onboarding) store the full name. A DB trigger syncs display_name into
+      // profiles — the user cannot write profiles.role themselves.
+      const data = { must_change_password: false };
+      if (needsName) data.display_name = fullName;
+      await supabase.auth.updateUser({ password: pw, data });
+      setMessage('All set. Taking you in…', 'info');
       onDone?.();
     } catch (err) {
       submitBtn.disabled = false;
-      setMessage(err?.message || 'Could not set your password. Please try again.', 'error');
+      setMessage(err?.message || 'Could not save your details. Please try again.', 'error');
     }
   });
 }

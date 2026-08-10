@@ -30,7 +30,8 @@ Row-Level Security (RLS) in Postgres is the real access boundary; the role-based
 convenience layer on top. Privileged actions (publishing to Puzzlr, inviting users) run in
 **Edge Functions** that hold the secret keys server-side — those keys never reach the
 browser. Access is **invite-only**: there is no public sign-up. Admins invite people from
-the Team area, and invitees set their password via an emailed link.
+the Team area; the invitee receives a **6-digit sign-in code** by email (no clickable link,
+so corporate mail scanners can't break it), then sets their full name and a password.
 
 ## Running locally
 
@@ -60,9 +61,15 @@ live only in Supabase Edge Function secrets. See
 - **Database schema** — the canonical schema is [`.github/relink_platform_schema.sql`](.github/relink_platform_schema.sql);
   incremental changes are applied as migrations under [`supabase/migrations/`](supabase/migrations/).
 - **Auth → URL Configuration** — add your deployment URL(s) to *Redirect URLs* and set the
-  *Site URL*, so invite and password-reset links return to the app.
+  *Site URL*, so password-reset links return to the app.
 - **Auth → Providers → Email** — disable *"Allow new users to sign up"* so the platform
-  stays invite-only at the server level too.
+  stays invite-only at the server level too. Ensure **email OTP** is enabled (it is by
+  default) so sign-in codes can be sent.
+- **Auth → Email Templates → Magic Link** — make sure the template shows the code, e.g.
+  `Your Relink sign-in code is {{ .Token }}`. This is the code the invitee types in; the
+  template's link is optional and never required to complete sign-in.
+- **Auth → Email OTP expiry** — the default is 1 hour. If a code expires, the user (or
+  admin) can request a fresh one from the *"Sign in with a code"* screen.
 - **Edge Function secrets** — set the Puzzlr key with
   `supabase secrets set PUZZLR_API_KEY=…`. The service-role key is auto-injected by
   Supabase; you do not set it yourself.

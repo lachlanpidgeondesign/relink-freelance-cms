@@ -24,7 +24,8 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.admin-create-user]
-# JWT verification ON. Admin-only. Creates a user with a temporary password and
-# assigns their role. Returns the temp password to the admin (shown once). Avoids
-# reliance on clickable invite links that corporate email scanners consume.
+# JWT verification ON. Admin-only. Pre-creates a user with the chosen role and
+# emails them a 6-digit sign-in code (via signInWithOtp). No temp password and no
+# clickable link, so corporate mail scanners can't consume the invite. The user
+# signs in with the code, then sets their full name and password.
 verify_jwt = true

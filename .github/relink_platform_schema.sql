@@ -389,6 +389,29 @@ create trigger trg_handle_new_user
   after insert on auth.users
   for each row execute function handle_new_user();
 
+-- Let a user set their OWN display name without opening a self-write hole on
+-- profiles. Onboarding writes the name into auth.users metadata (always allowed
+-- for the owner); this mirrors it into profiles. Only display_name is copied —
+-- role stays admin-assigned.
+create or replace function sync_profile_display_name()
+returns trigger language plpgsql
+security definer set search_path = public as $$
+begin
+  if (new.raw_user_meta_data->>'display_name')
+       is distinct from (old.raw_user_meta_data->>'display_name') then
+    update profiles
+      set display_name = nullif(new.raw_user_meta_data->>'display_name', '')
+      where id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_sync_profile_display_name on auth.users;
+create trigger trg_sync_profile_display_name
+  after update on auth.users
+  for each row execute function sync_profile_display_name();
+
 -- Never let a role change remove the FINAL admin — otherwise the system could be
 -- locked out with nobody able to manage users. (Demoting yourself when other
 -- admins remain, or demoting someone else, is fine.)

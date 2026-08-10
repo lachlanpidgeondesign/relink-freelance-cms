@@ -11,7 +11,7 @@
 // user signed-in but needing to set a password, so they're routed to the
 // set-password screen instead of straight into the app.
 // ============================================================================
-import { onAuthChange, signOut, renderAuthView, renderSetPasswordView, getSession } from './auth.js';
+import { onAuthChange, signOut, renderAuthView, renderSetPasswordView, renderCodeSignInView, getSession } from './auth.js';
 import { getCurrentUserRole, clearRoleCache } from './db.js';
 import { routeByRole } from './router.js';
 
@@ -53,6 +53,12 @@ async function showApp(session) {
 
 function showAuth() {
   clearRoleCache();
+  // The invitation email's plain link lands here with ?signin=code, so drop the
+  // invitee straight onto the email-code screen instead of the password form.
+  if (new URLSearchParams(window.location.search).get('signin') === 'code') {
+    renderCodeSignInView(mount, {});
+    return;
+  }
   renderAuthView(mount);
   // Surface a broken invite / reset link (expired or already-used token) with
   // actionable guidance. Clear the error hash so a refresh gives a clean screen.
@@ -73,11 +79,17 @@ function showAuth() {
 // re-fetch a fresh session before routing.
 function showSetPassword(session, overrideMode) {
   const mode = overrideMode || (_authAction === 'recovery' ? 'recovery' : 'invite');
-  // Drop the token hash from the address bar so a refresh doesn't re-trigger.
-  history.replaceState(null, document.title, window.location.pathname + window.location.search);
+  // Onboarding (never a password reset) collects the full name if we don't have
+  // one yet — a brand-new, code-invited user has no profile name.
+  const hasName = !!session.user?.user_metadata?.display_name;
+  const needsName = mode !== 'recovery' && !hasName;
+  // Drop the token hash AND the ?signin=code entry hint from the address bar so a
+  // refresh (or a later sign-out) doesn't re-trigger onboarding.
+  history.replaceState(null, document.title, window.location.pathname);
   renderSetPasswordView(mount, {
     mode,
     email: session.user?.email,
+    needsName,
     onDone: async () => {
       _authAction = null;   // consumed — route normally from here on
       clearRoleCache();
