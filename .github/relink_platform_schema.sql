@@ -289,7 +289,14 @@ create table puzzle_state_history (
 --   in_review         -> changes_requested    (reviewer/editor/admin) [bounce back]
 --   in_review         -> ready                (reviewer/editor/admin) [mark ready]
 --   changes_requested -> submitted            (writer, owner)      [resubmit]
+--   ready             -> changes_requested    (reviewer/editor/admin) [bounce back]
 --   ready             -> published            (editor/admin)       [push to Puzzlr]
+--   published         -> changes_requested    (editor/admin)       [recall from Puzzlr]
+--
+-- The last row is the only backward move past `published`: an editor/admin can
+-- recall a live puzzle to the writer (see 20260810000001_recall_published.sql).
+-- It does NOT unpublish on Puzzlr; the app layer clears puzzlr_level_id so the
+-- puzzle can be re-published once it returns through the pipeline.
 --
 -- Editor/admin edits to a puzzle in 'ready' do NOT change state (edit-in-place).
 -- Enforced here in a trigger so the rule holds no matter which client writes.
@@ -344,6 +351,9 @@ begin
         and r in ('editor','admin') then null;
   elsif (old.state, new.state) = ('ready','changes_requested')
         and r in ('reviewer','editor','admin') then null;
+  -- recall a live puzzle back to the writer (editor/admin only)
+  elsif (old.state, new.state) = ('published','changes_requested')
+        and r in ('editor','admin') then null;
   else
     raise exception 'Illegal transition % -> % for role %',
       old.state, new.state, r;

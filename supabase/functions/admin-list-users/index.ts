@@ -8,8 +8,8 @@
 // needs the Admin API (service-role). Gating that behind an admin check keeps
 // emails reachable ONLY by an admin, and the service-role key server-side.
 //
-// The response carries only { id, email, role, created_at } — nothing sensitive
-// (no tokens, no metadata, no password hashes).
+// The response carries only { id, email, role, display_name, created_at } —
+// nothing sensitive (no tokens, no metadata, no password hashes).
 // ============================================================================
 import { adminClient, json, requireAdmin } from '../_shared/admin.ts';
 import { corsHeaders } from '../_shared/cors.ts';
@@ -18,6 +18,7 @@ interface UserRow {
   id: string;
   email: string;
   role: string;
+  display_name: string;
   created_at: string;
 }
 
@@ -30,10 +31,11 @@ Deno.serve(async (req: Request) => {
 
   const admin = adminClient();
 
-  // Roles from profiles (service-role read; we're already admin-gated).
-  const { data: profiles, error: profErr } = await admin.from('profiles').select('id, role');
+  // Roles + names from profiles (service-role read; we're already admin-gated).
+  const { data: profiles, error: profErr } = await admin.from('profiles').select('id, role, display_name');
   if (profErr) return json({ error: 'Could not read profiles.' }, 500);
   const roleById = new Map<string, string>((profiles ?? []).map((p) => [p.id, p.role]));
+  const nameById = new Map<string, string>((profiles ?? []).map((p) => [p.id, p.display_name ?? '']));
 
   // Emails + join dates from auth.users, via the Admin API. Paginate defensively
   // — a POC won't exceed one page, but this stays correct if it grows.
@@ -47,6 +49,7 @@ Deno.serve(async (req: Request) => {
         id: u.id,
         email: u.email ?? '',
         role: roleById.get(u.id) ?? 'writer',
+        display_name: nameById.get(u.id) ?? '',
         created_at: u.created_at ?? '',
       });
     }

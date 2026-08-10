@@ -29,3 +29,11 @@ verify_jwt = true
 # clickable link, so corporate mail scanners can't consume the invite. The user
 # signs in with the code, then sets their full name and password.
 verify_jwt = true
+
+[functions.notify-submission]
+# JWT verification ON. Any signed-in author can call it, but only about their OWN
+# just-submitted puzzle. Uses the service-role key to read admin emails from
+# auth.users and emails them the submitter + timestamp via Resend
+# (RESEND_API_KEY + NOTIFY_FROM_EMAIL secrets). Called fire-and-forget after
+# submit, so a mail failure never blocks the submission.
+verify_jwt = true

@@ -181,6 +181,16 @@
     }
     .admin-user-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .admin-user-email { font-weight: 500; }
+    .admin-user-name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+    .admin-user-noname { font-weight: 400; font-style: italic; color: var(--muted); }
+    .admin-name-edit {
+      border: 0; background: transparent; color: var(--muted); cursor: pointer;
+      padding: 2px 4px; border-radius: 6px; font-size: 12px; line-height: 1;
+    }
+    .admin-name-edit:hover { background: #f0f1f3; color: var(--primary); }
+    .admin-name-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .admin-name-input { flex: 0 1 220px; font-weight: 400; font-size: 14px; }
+    .admin-name-msg { min-width: 0; text-align: left; }
     .admin-you {
       font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--primary);
       background: #eef2ff; padding: 1px 7px; border-radius: 999px; margin-left: 6px;

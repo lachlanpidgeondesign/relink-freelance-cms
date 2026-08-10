@@ -11,7 +11,7 @@
 // user signed-in but needing to set a password, so they're routed to the
 // set-password screen instead of straight into the app.
 // ============================================================================
-import { onAuthChange, signOut, renderAuthView, renderSetPasswordView, renderCodeSignInView, getSession } from './auth.js';
+import { onAuthChange, signOut, renderAuthView, renderSetPasswordView, renderCodeSignInView, consumeResetIntent, getSession } from './auth.js';
 import { getCurrentUserRole, clearRoleCache } from './db.js';
 import { routeByRole } from './router.js';
 
@@ -34,6 +34,12 @@ async function showApp(session) {
     // Force password change for users created with a temporary password.
     if (session.user?.user_metadata?.must_change_password) {
       showSetPassword(session, 'first_login');
+      return;
+    }
+    // A code sign-in started from "Forgot your password?" — let them set a new
+    // password now (the code got them in; this replaces the old emailed link).
+    if (consumeResetIntent()) {
+      showSetPassword(session, 'recovery');
       return;
     }
     const role = await getCurrentUserRole();

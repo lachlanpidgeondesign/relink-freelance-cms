@@ -16,7 +16,7 @@ import { supabase } from './client.js';
 // Writer-editable states (a writer's actionable working set) and the reviewer/
 // editor queue states, per the schema's state machine and RLS policies.
 export const WRITER_OPEN_STATES = ['draft', 'changes_requested'];
-const QUEUE_STATES = ['submitted', 'in_review', 'changes_requested', 'ready'];
+const QUEUE_STATES = ['submitted', 'in_review', 'changes_requested', 'ready', 'published'];
 
 // A puzzle in one of these states is still the writer's to edit; anything else
 // is read-only for them (RLS enforces this — the UI just mirrors it).
@@ -424,7 +424,7 @@ export async function listUsers() {
   const { data, error } = await supabase.functions.invoke('admin-list-users');
   if (error) throw await unwrapFunctionError(error);
   if (data?.error) throw new Error(data.error);
-  return data.users; // [{ id, email, role, created_at }]
+  return data.users; // [{ id, email, role, display_name, created_at }]
 }
 
 // Invite a new person by email with an initial role. Admin-only: the service-role
@@ -474,6 +474,25 @@ export async function updateUserRole(userId, role) {
   return data[0];
 }
 
+// Set (or clear) a user's display name. Admin-only: the same `profiles_admin_write`
+// RLS policy that gates role changes gates this too. Useful for naming people who
+// already have an account but never set their own name. Writing profiles directly
+// is safe — the auth.users → profiles name-sync trigger only fires the other way
+// (when the user edits their own metadata), so an admin-set name stays put until
+// the user themselves changes it. A blocked update surfaces as a thrown error.
+export async function updateUserName(userId, name) {
+  const trimmed = (name || '').trim();
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ display_name: trimmed || null })
+    .eq('id', userId)
+    .select('id, display_name');
+  if (error) throw new Error(error.message);
+  // RLS returns SUCCESS with zero rows when the caller isn't an admin.
+  if (!data || data.length === 0) throw new Error('Only admins can edit names.');
+  return data[0];
+}
+
 
 // ── Writer: drafts ──────────────────────────────────────────────────────────
 // (getMyDrafts / getDraft / createDraft / saveDraft / deleteDraft are defined
@@ -490,7 +509,26 @@ export async function submitPuzzle(puzzleId) {
     .select('id, state, updated_at')
     .single();
   if (error) throw error;
+  // Fire-and-forget: tell the admins a puzzle is waiting. Deliberately not
+  // awaited and fully swallowed — a notification hiccup must never block or
+  // fail the submission the author just made.
+  notifySubmission(puzzleId);
   return data;
+}
+
+// Ask the notify-submission Edge Function to email admins the submitter + time.
+// Errors are logged and dropped; this is best-effort only.
+function notifySubmission(puzzleId) {
+  try {
+    const appUrl = (typeof window !== 'undefined' && window.location)
+      ? window.location.origin
+      : undefined;
+    supabase.functions
+      .invoke('notify-submission', { body: { puzzleId, appUrl } })
+      .catch((e) => console.warn('notify-submission failed:', e?.message || e));
+  } catch (e) {
+    console.warn('notify-submission dispatch failed:', e?.message || e);
+  }
 }
 
 // ── Reviewer / editor / admin: queue ────────────────────────────────────────
@@ -713,6 +751,43 @@ export async function bounceBack(puzzleId, feedback) {
   if (error) throw error;
 
   // 2. Record the feedback.
+  const { data: bb, error: bbErr } = await supabase
+    .from('bounce_backs')
+    .insert({ puzzle_id: puzzleId, author_id: authorId, feedback: text })
+    .select('id, feedback, created_at, author_id')
+    .single();
+  if (bbErr) throw bbErr;
+
+  return { bounceBack: bb, puzzle: data };
+}
+
+// Recall a LIVE (published) puzzle back to its author (published ->
+// changes_requested), with required feedback — the same experience as an
+// ordinary bounce-back, just from the far end of the pipeline. Editors/admins
+// only; the DB trigger validate_puzzle_transition is the gate.
+//
+// This does NOT unpublish the level on Puzzlr (that lives on independently). It
+// only recalls our platform copy: we clear puzzlr_level_id and published_at in
+// the SAME update so the puzzle can be re-published later — the publish Edge
+// Function refuses a puzzle that still carries a puzzlr_level_id. Moving out of
+// 'published' also frees the shared publish_date slot (the partial-unique index
+// only covers ready/published). Leads with the transition (most likely to fail)
+// so a rejected recall never leaves an orphan feedback row behind.
+export async function recallPublished(puzzleId, feedback) {
+  const authorId = await requireUserId();
+  const text = (feedback || '').trim();
+  if (!text) throw new Error('A reason for the recall is required.');
+
+  // 1. Fire the transition + drop the Puzzlr link (trigger validates the move).
+  const { data, error } = await supabase
+    .from('puzzles')
+    .update({ state: 'changes_requested', puzzlr_level_id: null, published_at: null })
+    .eq('id', puzzleId)
+    .select('id, state, updated_at')
+    .single();
+  if (error) throw error;
+
+  // 2. Record the feedback (writer-facing, same bounce_backs history).
   const { data: bb, error: bbErr } = await supabase
     .from('bounce_backs')
     .insert({ puzzle_id: puzzleId, author_id: authorId, feedback: text })

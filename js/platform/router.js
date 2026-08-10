@@ -17,11 +17,11 @@ import { esc } from './dom.js';
 import { brandHtml, wireBrand } from './appbar.js';
 import {
   getQueue, getPuzzleForReview,
-  claimPuzzle, markReady, bounceBack,
+  claimPuzzle, markReady, bounceBack, recallPublished,
   getComments, addComment, getBounceBacks,
   adminDeletePuzzle, publishPuzzle,
   createDraft, getMyDrafts, submitPuzzle, fastTrackPublish,
-  listUsers, inviteUser, createUser, updateUserRole, USER_ROLES,
+  listUsers, inviteUser, createUser, updateUserRole, updateUserName, USER_ROLES,
 } from './db.js';
 import { mountRelinkGame } from '../relink-game/relink-game.js';
 
@@ -203,16 +203,22 @@ async function renderQueueView(root, ctx = {}) {
     const byState = {};
     for (const p of queue) (byState[p.state] ||= []).push(p);
 
-    const sections = QUEUE_GROUPS
+    // Editors/admins also see a "Published" group so they can reopen a live
+    // puzzle and recall it if needed; reviewers keep the pre-publish pipeline.
+    const groups = isEditor
+      ? [...QUEUE_GROUPS, { state: 'published', label: 'Published — live on Puzzlr' }]
+      : QUEUE_GROUPS;
+
+    const sections = groups
       .filter((g) => byState[g.state]?.length)
       .map((g) => {
         const rows = byState[g.state].map((p) => {
           const claimed = p.state === 'in_review'
             ? `<span class="view-row-claim">Claimed by ${esc(displayName(p.claimer))}</span>`
             : '';
-          // `ready` puzzles are safe to name; everything earlier hides the title
-          // (spoiler) and leads with the author + submission time instead.
-          const primary = p.state === 'ready'
+          // `ready` and `published` puzzles are safe to name; everything earlier
+          // hides the title (spoiler) and leads with the author + submission time.
+          const primary = (p.state === 'ready' || p.state === 'published')
             ? `${esc(p.title || 'Untitled puzzle')}
                <small class="view-row-submitted">by ${esc(displayName(p.author))}</small>`
             : `${esc(displayName(p.author))}
@@ -420,9 +426,17 @@ async function renderAdminView(root, ctx = {}) {
       users.sort((a, b) => (a.email || '').localeCompare(b.email || ''));
       usersList.innerHTML = users.map((u) => {
         const isMe = !!myEmail && (u.email || '').toLowerCase() === myEmail;
+        const name = (u.display_name || '').trim();
         return `
-          <div class="admin-user">
+          <div class="admin-user" data-user-row="${esc(u.id)}">
             <div class="admin-user-main">
+              <span class="admin-user-name">
+                ${name ? esc(name) : '<em class="admin-user-noname">No name set</em>'}
+                <button type="button" class="admin-name-edit" data-edit-name="${esc(u.id)}"
+                        data-name="${esc(name)}" title="Edit name" aria-label="Edit name for ${esc(u.email || 'user')}">
+                  <i class="fa-solid fa-pen"></i>
+                </button>
+              </span>
               <span class="admin-user-email">${esc(u.email || '—')}${
                 isMe ? ' <span class="admin-you">you</span>' : ''
               }</span>
@@ -486,7 +500,64 @@ async function renderAdminView(root, ctx = {}) {
     }
   });
 
-  // ── Create a new user ──────────────────────────────────────────────────────
+  // ── Edit a person's display name (inline) ──────────────────────────────────
+  // The pencil swaps the name line for a small input + Save/Cancel. Admin-only
+  // (updateUserName / RLS is the gate). Handy for naming people who have an
+  // account but never set their own name.
+  usersList.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-edit-name]');
+    if (!btn) return;
+    const nameSpan = btn.closest('.admin-user-name');
+    if (!nameSpan || nameSpan.querySelector('.admin-name-form')) return; // already editing
+    const userId = btn.dataset.editName;
+    const current = btn.dataset.name || '';
+
+    const prevHtml = nameSpan.innerHTML;
+    nameSpan.innerHTML = `
+      <span class="admin-name-form">
+        <input class="admin-input admin-name-input" type="text" value="${esc(current)}"
+               placeholder="Full name" aria-label="Full name" maxlength="120">
+        <button type="button" class="btn-primary btn-sm admin-name-save">Save</button>
+        <button type="button" class="btn-ghost btn-sm admin-name-cancel">Cancel</button>
+        <span class="admin-row-msg admin-name-msg" data-name-msg></span>
+      </span>`;
+
+    const input = nameSpan.querySelector('.admin-name-input');
+    const saveBtn = nameSpan.querySelector('.admin-name-save');
+    const cancelBtn = nameSpan.querySelector('.admin-name-cancel');
+    const msg = nameSpan.querySelector('[data-name-msg]');
+    input.focus();
+    input.select();
+
+    const cancel = () => { nameSpan.innerHTML = prevHtml; };
+    cancelBtn.addEventListener('click', cancel);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') cancel();
+      if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+    });
+
+    async function save() {
+      const newName = input.value.trim();
+      if (newName === current.trim()) { cancel(); return; }
+      saveBtn.disabled = true;
+      cancelBtn.disabled = true;
+      input.disabled = true;
+      msg.textContent = 'Saving…';
+      msg.className = 'admin-row-msg admin-name-msg';
+      try {
+        await updateUserName(userId, newName);
+        // Re-render the whole list so the name (and its data-* attributes) refresh.
+        loadUsers();
+      } catch (err) {
+        saveBtn.disabled = false;
+        cancelBtn.disabled = false;
+        input.disabled = false;
+        msg.textContent = err.message;
+        msg.className = 'admin-row-msg admin-row-msg-err admin-name-msg';
+      }
+    }
+    saveBtn.addEventListener('click', save);
+  });
   const inviteResult = root.querySelector('#invite-result');
   const inviteResultText = root.querySelector('#invite-result-text');
 
@@ -596,22 +667,33 @@ function createCommentsPanel(puzzleId) {
 
 // ── Send back to writer (shared modal) ───────────────────────────────────────
 // A focused modal: a required reason plus the history of anything sent back
-// before. On success the puzzle returns to its author (in_review →
-// changes_requested) and `onDone` fires. Used by both the reviewer's review view
-// and the editor's editing view, so the send-back experience is identical.
-async function openSendBackModal(root, puzzleId, { onDone } = {}) {
+// before. On success the puzzle returns to its author and `onDone` fires. Used
+// by the reviewer's review view and the editor's editing view, so the send-back
+// experience is identical.
+//
+// By default it runs an in_review/ready → changes_requested bounce-back, but the
+// caller can pass a different `action` (and matching copy) to reuse the same UI —
+// the editor's "Recall from Puzzlr" (published → changes_requested) does exactly
+// that. `action(puzzleId, feedback)` must return a promise.
+async function openSendBackModal(root, puzzleId, {
+  onDone,
+  action = bounceBack,
+  title = 'Send back to writer',
+  subtitle = 'The puzzle returns to its author with your note (state → changes requested).',
+  sendLabel = 'Send back',
+} = {}) {
   if (root.querySelector('#sendback-modal')) return;
 
   const overlay = document.createElement('div');
   overlay.id = 'sendback-modal';
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Send back to writer">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <div class="modal-head">
-        <h3 class="modal-title">Send back to writer</h3>
+        <h3 class="modal-title">${esc(title)}</h3>
         <button class="modal-close" aria-label="Close">&times;</button>
       </div>
-      <p class="modal-sub">The puzzle returns to its author with your note (state → changes requested).</p>
+      <p class="modal-sub">${esc(subtitle)}</p>
       <div id="sendback-history" class="sendback-history"></div>
       <textarea id="sendback-body" class="review-textarea" rows="4"
                 placeholder="A short reason for the changes… (required)"></textarea>
@@ -619,7 +701,7 @@ async function openSendBackModal(root, puzzleId, { onDone } = {}) {
         <span id="sendback-msg" class="inline-msg"></span>
         <div class="modal-foot-actions">
           <button id="sendback-cancel" class="btn-ghost">Cancel</button>
-          <button id="sendback-send" class="btn-danger">Send back</button>
+          <button id="sendback-send" class="btn-danger">${esc(sendLabel)}</button>
         </div>
       </div>
     </div>`;
@@ -658,7 +740,7 @@ async function openSendBackModal(root, puzzleId, { onDone } = {}) {
     const sendBtn = overlay.querySelector('#sendback-send');
     sendBtn.disabled = true;
     try {
-      await bounceBack(puzzleId, feedback);
+      await action(puzzleId, feedback);
       close();
       onDone?.();
     } catch (err) {
@@ -919,9 +1001,22 @@ async function renderEditingView(root, item, ctx = {}, opts = {}) {
         openSendBackModal(root, puzzleId, { onDone: leaveToQueue }));
       decisions.querySelector('#d-publish').addEventListener('click', () => runPublish());
     } else if (item.state === 'published') {
-      decisions.innerHTML = `<span class="decision-note">Published${
-        item.puzzlrLevelId ? ` — level ${esc(item.puzzlrLevelId)}` : ''
-      }</span>`;
+      // Live on Puzzlr. Editors/admins may recall it back to the writer
+      // (published → changes_requested) — this does NOT unpublish on Puzzlr, it
+      // drops our link so the puzzle can be re-published after further edits.
+      decisions.innerHTML = `
+        <span class="decision-note">Published${
+          item.puzzlrLevelId ? ` — level ${esc(item.puzzlrLevelId)}` : ''
+        }</span>
+        <button id="d-recall" class="btn-danger-ghost btn-sm" title="Send this live puzzle back to the writer for changes">Recall from Puzzlr</button>`;
+      decisions.querySelector('#d-recall').addEventListener('click', () =>
+        openSendBackModal(root, puzzleId, {
+          onDone: leaveToQueue,
+          action: recallPublished,
+          title: 'Recall from Puzzlr',
+          subtitle: 'The puzzle returns to its author with your note (state → changes requested). The live Puzzlr level is left untouched; the link is cleared so it can be re-published after edits.',
+          sendLabel: 'Recall',
+        }));
     } else if (item.state === 'draft' && fromCreate) {
       renderAuthorActions();
     } else {
