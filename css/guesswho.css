@@ -76,6 +76,19 @@ body {
 .admin-msg-ok { color: #15803d; }
 .admin-msg-error { color: var(--error); }
 
+/* Readiness checklist banner — spells out what still blocks preview/publish
+   (disabled-button tooltips don't fire, so this is the visible fallback). */
+.gw-readiness {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 10px 0 0; padding: 9px 12px; font-size: 13px; line-height: 1.4;
+  border-radius: var(--radius); border: 1px solid #fde8c8;
+  background: #fffaf0; color: var(--warning);
+}
+.gw-readiness.is-ready { border-color: #cdefd6; background: #f2fbf5; color: #15803d; }
+.gw-readiness i { margin-top: 1px; }
+.gw-readiness[hidden] { display: none; }
+
+
 /* ----------------------------------------------------------------------------
    STATE PILLS — colour-coded (NEW; platform.html's .view-row-state was unused
    dead CSS and every state rendered the same indigo pill). Guess Who's three

@@ -408,6 +408,8 @@
     // is no approval workflow, so this stays blocking. Warnings never count.
     function evaluateReadiness() {
       const missing = [];
+      const answer = editorEls.answerInput ? editorEls.answerInput.value.trim() : '';
+      if (!answer) missing.push('the answer');
       clues.forEach((c, i) => {
         const n = i + 1;
         if (!(c.clueText && c.clueText.trim())) missing.push(`clue ${n} text`);
@@ -427,6 +429,20 @@
       if (editorEls.publishBtn) {
         editorEls.publishBtn.disabled = !ready;
         editorEls.publishBtn.title = ready ? 'Save, then publish to everyone' : missingTitle;
+      }
+
+      // Visible checklist — tooltips don't show on disabled buttons, so spell out
+      // exactly what's blocking preview/publish (and confirm when nothing is).
+      const banner = editorEls.readinessEl;
+      if (banner) {
+        if (ready) {
+          banner.className = 'gw-readiness is-ready';
+          banner.innerHTML = `<i class="fa-solid fa-circle-check"></i> Ready — you can mark it for preview or publish.`;
+        } else {
+          banner.className = 'gw-readiness';
+          banner.innerHTML = `<i class="fa-solid fa-circle-info"></i> To preview or publish, still needed: ${esc(missing.join(', '))}.`;
+        }
+        banner.hidden = false;
       }
     }
 
@@ -541,7 +557,7 @@
           g = {
             id: null, slug: null, game_number: await nextGameNumber(),
             answer: '', accepted_answers: [], gender: null,
-            reveal_image_url: '', reveal_credit: '', read_more_url: '', significance: '',
+            reveal_image_url: '', reveal_credit: '', read_more_url: '',
             status: 'draft', notes: '', clues: [],
           };
         } else {
@@ -583,6 +599,7 @@
               <button class="btn-primary btn-sm" data-publish disabled>Publish</button>
             </div>
           </div>
+          <p class="gw-readiness" data-readiness hidden></p>
           <p class="admin-msg" data-msg hidden></p>
 
           <!-- 1. The answer -->
@@ -645,11 +662,6 @@
               <label class="gw-label" for="gw-read-more">Read more URL</label>
               <input class="gw-input" id="gw-read-more" type="text" value="${esc(g.read_more_url || '')}" placeholder="https://…">
             </div>
-            <div class="gw-field">
-              <label class="gw-label" for="gw-significance">Significance</label>
-              <textarea class="gw-textarea" id="gw-significance" placeholder="A fun fact about this person…">${esc(g.significance || '')}</textarea>
-              <span class="gw-help">Fun fact shown on the result screen. Optional.</span>
-            </div>
           </div>
 
           <!-- 4. Status -->
@@ -684,8 +696,10 @@
         saveBtn: view.querySelector('[data-save]'),
         previewBtn: view.querySelector('[data-preview]'),
         publishBtn: view.querySelector('[data-publish]'),
+        readinessEl: view.querySelector('[data-readiness]'),
         msgEl: view.querySelector('[data-msg]'),
         acceptedBox: view.querySelector('[data-accepted]'),
+        answerInput: view.querySelector('#gw-answer'),
         revealCredit: view.querySelector('#gw-reveal-credit'),
         revealThumb: view.querySelector('[data-reveal-thumb]'),
         revealError: view.querySelector('[data-reveal-error]'),
@@ -708,7 +722,6 @@
           reveal_image_url: norm(v('#gw-reveal-image')),
           reveal_credit: norm(v('#gw-reveal-credit')),
           read_more_url: norm(v('#gw-read-more')),
-          significance: norm(v('#gw-significance')),
           notes: norm(v('#gw-notes')),
         };
       }
@@ -843,6 +856,7 @@
       revealUrl.addEventListener('focusout', () => { reveal.imageUrl = revealUrl.value; validateReveal(); });
       revealUrl.addEventListener('paste', () => { setTimeout(() => { reveal.imageUrl = revealUrl.value; validateReveal(); }, 0); });
       editorEls.revealCredit.addEventListener('input', evaluateReadiness);
+      editorEls.answerInput.addEventListener('input', evaluateReadiness);
 
       // Build the clue rows, wire their interactions, then validate what loaded
       // from the database so thumbnails and the readiness gate reflect reality.

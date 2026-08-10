@@ -43,7 +43,7 @@ export async function getGame(id) {
     .from('gw_games')
     .select(`
       id, slug, game_number, answer, accepted_answers, gender,
-      reveal_image_url, reveal_credit, read_more_url, significance,
+      reveal_image_url, reveal_credit, read_more_url,
       status, notes, created_at, updated_at,
       gw_clues ( id, position, clue_text, image_url, credit )
     `)
@@ -85,7 +85,7 @@ export async function createGame(fields) {
     .insert({ ...fields, created_by: user?.id ?? null })
     .select(`
       id, slug, game_number, answer, accepted_answers, gender,
-      reveal_image_url, reveal_credit, read_more_url, significance,
+      reveal_image_url, reveal_credit, read_more_url,
       status, notes, created_at, updated_at
     `)
     .single();
